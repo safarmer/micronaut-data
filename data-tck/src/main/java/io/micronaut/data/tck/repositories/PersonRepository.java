@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.tck.repositories;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.context.annotation.Parameter;
 import io.micronaut.data.annotation.Id;
 import io.micronaut.data.annotation.Query;
@@ -26,6 +26,7 @@ import io.micronaut.data.model.Sort;
 import io.micronaut.data.repository.CrudRepository;
 import io.micronaut.data.repository.PageableRepository;
 import io.micronaut.data.tck.entities.Person;
+import io.micronaut.data.tck.entities.TotalDto;
 import io.reactivex.Single;
 
 import java.util.List;
@@ -35,11 +36,17 @@ import java.util.concurrent.Future;
 
 public interface PersonRepository extends CrudRepository<Person, Long>, PageableRepository<Person, Long> {
 
+    @Query("select count(*) as total from person")
+    TotalDto getTotal();
+
     int countByAgeGreaterThan(Integer wrapper);
 
     int countByAgeLessThan(int wrapper);
 
-    Person save(String name, int age);
+    Person save(@Parameter("name") String name, @Parameter("age") int age);
+
+    @Query("INSERT INTO person(name, age, enabled) VALUES (:xyz, :age, TRUE)")
+    int saveCustom(@Parameter("xyz") String xyz, @Parameter("age") int age);
 
     Person get(Long id);
 
@@ -52,11 +59,11 @@ public interface PersonRepository extends CrudRepository<Person, Long>, Pageable
     @Query("UPDATE person SET name = 'test' WHERE id = :id")
     Single<Long> updatePersonCustomRx(Long id);
 
-    @Query("UPDATE person SET name = 'test' WHERE id = :id")
-    Future<Long> updatePersonCustomFuture(Long id);
+    @Query("UPDATE person SET name = 'test' WHERE id = :xyz")
+    Future<Long> updatePersonCustomFuture(Long xyz);
 
-    @Query("UPDATE person SET name = 'test' WHERE id = :id")
-    long updatePersonCustom(Long id);
+    @Query("UPDATE person SET name = 'test' WHERE id = :xyz")
+    long updatePersonCustom(Long xyz);
 
     @Query("SELECT * FROM person WHERE name = :names1 or name IN(:names3) or name IN(:names0) or (:name4 = name)")
     List<Person> queryNames(List<String> names0, String names1, List<String> names2, List<String> names3, String name4);
@@ -111,4 +118,29 @@ public interface PersonRepository extends CrudRepository<Person, Long>, Pageable
     @Query(value = "select * from person person_ where person_.name like :n",
             countQuery = "select count(*) from person person_ where person_.name like :n")
     Page<Person> findPeople(String n, Pageable pageable);
+
+    long updateAll(List<Person> people);
+
+    List<Person> updatePeople(List<Person> people);
+
+    @Query("UPDATE person SET name = :newName WHERE (name = :oldName)")
+    long updateNamesCustom(String newName, String oldName);
+
+    @Query("UPDATE person SET name = :name WHERE id = :id")
+    long updateCustomOnlyNames(List<Person> people);
+
+    @Query("INSERT INTO person(name, age, enabled) VALUES (:name, :age, TRUE)")
+    int saveCustom(List<Person> people);
+
+    @Query("INSERT INTO person(name, age, enabled) VALUES (:name, :age, TRUE)")
+    int saveCustomSingle(Person people);
+
+    @Query("DELETE FROM person WHERE name = :name")
+    int deleteCustom(List<Person> people);
+
+    @Query("DELETE FROM person WHERE name = :name")
+    int deleteCustomSingle(Person person);
+
+    @Query("DELETE FROM person WHERE name = :xyz")
+    int deleteCustomSingleNoEntity(String xyz);
 }

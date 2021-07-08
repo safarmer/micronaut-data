@@ -15,11 +15,12 @@
  */
 package io.micronaut.data.hibernate.operations;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.context.ApplicationContext;
 import io.micronaut.context.annotation.EachBean;
 import io.micronaut.context.annotation.Parameter;
 import io.micronaut.core.annotation.AnnotationMetadata;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.annotation.TypeHint;
 import io.micronaut.core.beans.BeanWrapper;
 import io.micronaut.core.convert.ConversionService;
@@ -29,6 +30,7 @@ import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.core.util.ArrayUtils;
 import io.micronaut.core.util.CollectionUtils;
 import io.micronaut.data.annotation.QueryHint;
+import io.micronaut.data.intercept.annotation.DataMethod;
 import io.micronaut.data.jpa.annotation.EntityGraph;
 import io.micronaut.data.jpa.operations.JpaRepositoryOperations;
 import io.micronaut.data.model.DataType;
@@ -36,7 +38,18 @@ import io.micronaut.data.model.Page;
 import io.micronaut.data.model.Pageable;
 import io.micronaut.data.model.Sort;
 import io.micronaut.data.model.query.builder.jpa.JpaQueryBuilder;
-import io.micronaut.data.model.runtime.*;
+import io.micronaut.data.model.runtime.DeleteBatchOperation;
+import io.micronaut.data.model.runtime.DeleteOperation;
+import io.micronaut.data.model.runtime.InsertBatchOperation;
+import io.micronaut.data.model.runtime.InsertOperation;
+import io.micronaut.data.model.runtime.PagedQuery;
+import io.micronaut.data.model.runtime.PreparedQuery;
+import io.micronaut.data.model.runtime.RuntimeEntityRegistry;
+import io.micronaut.data.model.runtime.RuntimePersistentEntity;
+import io.micronaut.data.model.runtime.RuntimePersistentProperty;
+import io.micronaut.data.model.runtime.StoredQuery;
+import io.micronaut.data.model.runtime.UpdateBatchOperation;
+import io.micronaut.data.model.runtime.UpdateOperation;
 import io.micronaut.data.operations.async.AsyncCapableRepository;
 import io.micronaut.data.operations.reactive.ReactiveCapableRepository;
 import io.micronaut.data.operations.reactive.ReactiveRepositoryOperations;
@@ -48,6 +61,7 @@ import io.micronaut.transaction.TransactionOperations;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.graph.RootGraph;
+import org.hibernate.graph.SubGraph;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.query.Query;
 import org.hibernate.type.Type;
@@ -57,16 +71,24 @@ import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
 import javax.persistence.FlushModeType;
 import javax.persistence.Tuple;
-import javax.persistence.criteria.*;
+import javax.persistence.TupleElement;
+import javax.persistence.criteria.CriteriaBuilder;
+import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Expression;
+import javax.persistence.criteria.Order;
+import javax.persistence.criteria.Path;
+import javax.persistence.criteria.Root;
 import java.io.Serializable;
 import java.sql.Connection;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -87,6 +109,7 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
     private static final JpaQueryBuilder QUERY_BUILDER = new JpaQueryBuilder();
     private final SessionFactory sessionFactory;
     private final TransactionOperations<Connection> transactionOperations;
+    private final RuntimeEntityRegistry runtimeEntityRegistry;
     private ExecutorAsyncOperations asyncOperations;
     private ExecutorService executorService;
 
@@ -96,15 +119,23 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
      * @param sessionFactory        The session factory
      * @param transactionOperations The transaction operations
      * @param executorService       The executor service for I/O tasks to use
+     * @param runtimeEntityRegistry The runtime entity registry
      */
     protected HibernateJpaOperations(
             @NonNull SessionFactory sessionFactory,
             @NonNull @Parameter TransactionOperations<Connection> transactionOperations,
-            @Named("io") @Nullable ExecutorService executorService) {
+            @Named("io") @Nullable ExecutorService executorService,
+            RuntimeEntityRegistry runtimeEntityRegistry) {
         ArgumentUtils.requireNonNull("sessionFactory", sessionFactory);
+        this.runtimeEntityRegistry = runtimeEntityRegistry;
         this.sessionFactory = sessionFactory;
         this.transactionOperations = transactionOperations;
         this.executorService = executorService;
+    }
+
+    @Override
+    public ApplicationContext getApplicationContext() {
+        return runtimeEntityRegistry.getApplicationContext();
     }
 
     @NonNull
@@ -130,6 +161,15 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
         });
     }
 
+    @NonNull
+    @Override
+    public <T> T load(@NonNull Class<T> type, @NonNull Serializable id) {
+        return transactionOperations.executeRead(status -> {
+            final Session session = sessionFactory.getCurrentSession();
+            return session.load(type, id);
+        });
+    }
+
     @Nullable
     @Override
     public <T, R> R findOne(@NonNull PreparedQuery<T, R> preparedQuery) {
@@ -141,40 +181,47 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
             if (preparedQuery.isDtoProjection()) {
                 Query<Tuple> q;
                 if (preparedQuery.isNative()) {
-                    q = currentSession
-                            .createNativeQuery(query, Tuple.class);
-
+                    q = currentSession.createNativeQuery(query, Tuple.class);
+                } else if (query.toLowerCase(Locale.ENGLISH).startsWith("select new ")) {
+                    Query<R> dtoQuery = currentSession.createQuery(query, resultType);
+                    bindParameters(dtoQuery, preparedQuery, query);
+                    bindQueryHints(dtoQuery, preparedQuery, currentSession);
+                    return dtoQuery.uniqueResult();
                 } else {
-                    q = currentSession
-                            .createQuery(query, Tuple.class);
+                    q = currentSession.createQuery(query, Tuple.class);
                 }
                 bindParameters(q, preparedQuery, query);
                 bindQueryHints(q, preparedQuery, currentSession);
-                q.setMaxResults(1);
-                return q.uniqueResultOptional()
-                        .map(tuple -> ((BeanIntrospectionMapper<Tuple, R>) Tuple::get).map(tuple, resultType))
-                        .orElse(null);
+
+                Tuple tuple = first(q.list().iterator());
+                if (tuple != null) {
+                    return ((BeanIntrospectionMapper<Tuple, R>) Tuple::get).map(tuple, resultType);
+                }
+                return null;
             } else {
                 Query<R> q;
-
                 if (preparedQuery.isNative()) {
                     if (DataType.ENTITY.equals(preparedQuery.getResultDataType())) {
-                        q = currentSession
-                                .createNativeQuery(query, resultType);
+                        q = currentSession.createNativeQuery(query, resultType);
                     } else {
-                        q = currentSession
-                                .createNativeQuery(query);
+                        q = currentSession.createNativeQuery(query);
                     }
                 } else {
-                    q = currentSession
-                            .createQuery(query, resultType);
+                    q = currentSession.createQuery(query, resultType);
                 }
                 bindParameters(q, preparedQuery, query);
                 bindQueryHints(q, preparedQuery, currentSession);
-                q.setMaxResults(1);
-                return q.uniqueResultOptional().orElse(null);
+
+                return first(q.list().iterator());
             }
         });
+    }
+
+    private <T> T first(Iterator<T> iterator) {
+        if (iterator.hasNext()) {
+            return iterator.next();
+        }
+        return null;
     }
 
     private <T, R> void bindParameters(Query<?> q, @NonNull PreparedQuery<T, R> preparedQuery, String query) {
@@ -188,36 +235,29 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
             if (parameterIndex > -1) {
                 value = parameterArray[parameterIndex];
             } else {
+                String[] indexedParameterAutoPopulatedPropertyPaths = preparedQuery.getIndexedParameterAutoPopulatedPropertyPaths();
                 String[] indexedParameterPaths = preparedQuery.getIndexedParameterPaths();
                 String propertyPath = i < indexedParameterPaths.length ? indexedParameterPaths[i] : null;
-                if (propertyPath != null) {
-                    String lastUpdatedProperty = preparedQuery.getLastUpdatedProperty();
-                    if (lastUpdatedProperty != null && lastUpdatedProperty.equals(propertyPath)) {
-                        Class<?> lastUpdatedType = preparedQuery.getLastUpdatedType();
-                        if (lastUpdatedType == null) {
-                            throw new IllegalStateException("Could not establish last updated time for entity: " + preparedQuery.getRootEntity());
-                        }
-                        Object timestamp = ConversionService.SHARED.convert(OffsetDateTime.now(), lastUpdatedType).orElse(null);
-                        if (timestamp == null) {
-                            throw new IllegalStateException("Unsupported date type: " + lastUpdatedType);
-                        }
-                        value = timestamp;
-                    } else {
-                        int j = propertyPath.indexOf('.');
-                        if (j > -1) {
-                            String subProp = propertyPath.substring(j + 1);
-                            value = parameterArray[Integer.parseInt(propertyPath.substring(0, j))];
-                            value = BeanWrapper.getWrapper(value).getRequiredProperty(subProp, Argument.OBJECT_ARGUMENT);
-                        } else {
-                            throw new IllegalStateException("Invalid query [" + query + "]. Unable to establish parameter value for parameter at position: " + (i + 1));
-                        }
+                String autoPopulatedPropertyPath = indexedParameterAutoPopulatedPropertyPaths[i];
+                if (autoPopulatedPropertyPath != null) {
+                    RuntimePersistentEntity<T> persistentEntity = getEntity(preparedQuery.getRootEntity());
+                    RuntimePersistentProperty<T> persistentProperty = persistentEntity.getPropertyByName(autoPopulatedPropertyPath);
+                    if (persistentProperty == null) {
+                        throw new IllegalStateException("Cannot find auto populated property: " + autoPopulatedPropertyPath);
                     }
+                    Object previousValue = null;
+                    if (propertyPath != null) {
+                        previousValue = resolveQueryParameterByPath(query, i, parameterArray, propertyPath);
+                    }
+                    value = runtimeEntityRegistry.autoPopulateRuntimeProperty(persistentProperty, previousValue);
+                } else if (propertyPath != null) {
+                    value = resolveQueryParameterByPath(query, i, parameterArray, propertyPath);
                 } else {
                     throw new IllegalStateException("Invalid query [" + query + "]. Unable to establish parameter value for parameter at name: " + parameterName);
                 }
             }
             if (preparedQuery.isNative()) {
-                Argument<?> argument = preparedQuery.getArguments()[i];
+                Argument<?> argument = preparedQuery.getArguments()[parameterIndex];
                 Class<?> argumentType = argument.getType();
                 if (Collection.class.isAssignableFrom(argumentType)) {
                     Type valueType = sessionFactory.getTypeHelper().heuristicType(argument.getFirstTypeVariable().orElse(Argument.OBJECT_ARGUMENT).getType().getName());
@@ -237,6 +277,17 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
                 }
             }
             q.setParameter(parameterName, value);
+        }
+    }
+
+    private Object resolveQueryParameterByPath(String query, int i, Object[] queryParameters, String propertyPath) {
+        int j = propertyPath.indexOf('.');
+        if (j > -1) {
+            String subProp = propertyPath.substring(j + 1);
+            Object indexedValue = queryParameters[Integer.parseInt(propertyPath.substring(0, j))];
+            return BeanWrapper.getWrapper(indexedValue).getRequiredProperty(subProp, Argument.OBJECT_ARGUMENT);
+        } else {
+            throw new IllegalStateException("Invalid query [" + query + "]. Unable to establish parameter value for parameter at position: " + (i + 1));
         }
     }
 
@@ -295,30 +346,36 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
             }
             if (preparedQuery.isDtoProjection()) {
                 Query<Tuple> q;
-
                 if (preparedQuery.isNative()) {
-                    q = entityManager
-                            .createNativeQuery(queryStr, Tuple.class);
-
+                    q = entityManager.createNativeQuery(queryStr, Tuple.class);
+                } else if (queryStr.toLowerCase(Locale.ENGLISH).startsWith("select new ")) {
+                    Class<R> wrapperType = ReflectionUtils.getWrapperType(preparedQuery.getResultType());
+                    Query<R> query = entityManager.createQuery(queryStr, wrapperType);
+                    bindPreparedQuery(query, preparedQuery, entityManager, queryStr);
+                    return query.list();
                 } else {
-                    q = entityManager
-                            .createQuery(queryStr, Tuple.class);
+                    q = entityManager.createQuery(queryStr, Tuple.class);
                 }
-
                 bindPreparedQuery(q, preparedQuery, entityManager, queryStr);
                 return q.stream()
-                        .map(tuple -> ((BeanIntrospectionMapper<Tuple, R>) Tuple::get).map(tuple, preparedQuery.getResultType()))
+                        .map(tuple -> {
+                            Set<String> properties = tuple.getElements().stream().map(TupleElement::getAlias).collect(Collectors.toSet());
+                            return ((BeanIntrospectionMapper<Tuple, R>) (tuple1, alias) -> {
+                                if (!properties.contains(alias)) {
+                                    return null;
+                                }
+                                return tuple1.get(alias);
+                            }).map(tuple, preparedQuery.getResultType());
+                        })
                         .collect(Collectors.toList());
             } else {
                 Class<R> wrapperType = ReflectionUtils.getWrapperType(preparedQuery.getResultType());
                 Query<R> q;
                 if (preparedQuery.isNative()) {
-                    q = entityManager
-                            .createNativeQuery(queryStr, wrapperType);
+                    q = entityManager.createNativeQuery(queryStr, wrapperType);
 
                 } else {
-                    q = entityManager
-                            .createQuery(queryStr, wrapperType);
+                    q = entityManager.createQuery(queryStr, wrapperType);
                 }
                 bindPreparedQuery(q, preparedQuery, entityManager, queryStr);
                 return q.list();
@@ -344,10 +401,33 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
                         RootGraph<?> entityGraph = session.getEntityGraph(graphName);
                         q.setHint(hintName, entityGraph);
                     } else if (value instanceof String[]) {
-                        String[] paths = (String[]) value;
-                        if (ArrayUtils.isNotEmpty(paths)) {
+                        String[] pathsDefinitions = (String[]) value;
+                        if (ArrayUtils.isNotEmpty(pathsDefinitions)) {
                             RootGraph<T> entityGraph = session.createEntityGraph(preparedQuery.getRootEntity());
-                            entityGraph.addAttributeNodes(paths);
+                            for (String pathsDefinition : pathsDefinitions) {
+                                String[] paths = pathsDefinition.split("\\.");
+                                if (paths.length == 1) {
+                                    entityGraph.addAttributeNode(paths[0]);
+                                } else {
+                                    SubGraph<T> subGraph = null;
+                                    for (int i = 0; i < paths.length; i++) {
+                                        String path = paths[i];
+                                        if (subGraph == null) {
+                                            if (i + 1 == paths.length) {
+                                                entityGraph.addAttributeNode(path);
+                                            } else {
+                                                subGraph = entityGraph.addSubGraph(path);
+                                            }
+                                        } else {
+                                            if (i + 1 == paths.length) {
+                                                subGraph.addAttributeNode(path);
+                                            } else {
+                                                subGraph = subGraph.addSubGraph(path);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             q.setHint(hintName, entityGraph);
                         }
                     }
@@ -377,7 +457,13 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
     @NonNull
     @Override
     public <T> T update(@NonNull UpdateOperation<T> operation) {
+        AnnotationMetadata annotationMetadata = operation.getAnnotationMetadata();
+        String queryString = annotationMetadata.stringValue(io.micronaut.data.annotation.Query.class).orElse(null);
         return transactionOperations.executeWrite(status -> {
+            if (queryString != null) {
+                executeEntityUpdate(annotationMetadata, queryString, operation.getEntity());
+                return operation.getEntity();
+            }
             T entity = operation.getEntity();
             EntityManager session = sessionFactory.getCurrentSession();
             entity = session.merge(entity);
@@ -386,19 +472,38 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
         });
     }
 
+    @NonNull
+    @Override
+    public <T> Iterable<T> updateAll(@NonNull UpdateBatchOperation<T> operation) {
+        AnnotationMetadata annotationMetadata = operation.getAnnotationMetadata();
+        String queryString = annotationMetadata.stringValue(io.micronaut.data.annotation.Query.class).orElse(null);
+        return transactionOperations.executeWrite(status -> {
+            if (queryString != null) {
+                for (T entity : operation) {
+                    executeEntityUpdate(annotationMetadata, queryString, entity);
+                }
+                return operation;
+            }
+            EntityManager entityManager = sessionFactory.getCurrentSession();
+            for (T entity : operation) {
+                entityManager.merge(entity);
+            }
+            flushIfNecessary(entityManager, operation.getAnnotationMetadata());
+            return operation;
+        });
+    }
+
     @SuppressWarnings("ConstantConditions")
     @NonNull
     @Override
-    public <T> Iterable<T> persistAll(@NonNull BatchOperation<T> operation) {
+    public <T> Iterable<T> persistAll(@NonNull InsertBatchOperation<T> operation) {
         return transactionOperations.executeWrite(status -> {
             if (operation != null) {
                 EntityManager entityManager = sessionFactory.getCurrentSession();
                 for (T entity : operation) {
                     entityManager.persist(entity);
                 }
-                AnnotationMetadata annotationMetadata =
-                        operation.getAnnotationMetadata();
-                flushIfNecessary(entityManager, annotationMetadata);
+                flushIfNecessary(entityManager, operation.getAnnotationMetadata());
                 return operation;
             } else {
                 return Collections.emptyList();
@@ -420,7 +525,6 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
     @NonNull
     @Override
     public Optional<Number> executeUpdate(@NonNull PreparedQuery<?, Number> preparedQuery) {
-        //noinspection ConstantConditions
         return transactionOperations.executeWrite(status -> {
             String query = preparedQuery.getQuery();
             Query<?> q = getCurrentSession().createQuery(query);
@@ -430,30 +534,55 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
     }
 
     @Override
-    public <T> Optional<Number> deleteAll(@NonNull BatchOperation<T> operation) {
-        if (operation.all()) {
-            return transactionOperations.executeWrite(status -> {
-                Class<T> entityType = operation.getRootEntity();
-                Session session = getCurrentSession();
-                CriteriaDelete<T> criteriaDelete = session.getCriteriaBuilder().createCriteriaDelete(entityType);
-                criteriaDelete.from(entityType);
-                Query query = session.createQuery(
-                        criteriaDelete
-                );
-                return Optional.of(query.executeUpdate());
-            });
-        } else {
-            Integer result = transactionOperations.executeWrite(status -> {
+    public <T> int delete(@NonNull DeleteOperation<T> operation) {
+        AnnotationMetadata annotationMetadata = operation.getAnnotationMetadata();
+        String queryString = annotationMetadata.stringValue(io.micronaut.data.annotation.Query.class).orElse(null);
+        return transactionOperations.executeWrite(status -> {
+            if (queryString != null) {
+                return executeEntityUpdate(annotationMetadata, queryString, operation.getEntity());
+            }
+            getCurrentSession().remove(operation.getEntity());
+            return 1;
+        });
+    }
+
+    @Override
+    public <T> Optional<Number> deleteAll(@NonNull DeleteBatchOperation<T> operation) {
+        AnnotationMetadata annotationMetadata = operation.getAnnotationMetadata();
+        String queryString = annotationMetadata.stringValue(io.micronaut.data.annotation.Query.class).orElse(null);
+        Integer result = transactionOperations.executeWrite(status -> {
+            if (queryString != null) {
                 int i = 0;
-                Session session = getCurrentSession();
                 for (T entity : operation) {
-                    session.remove(entity);
-                    i++;
+                    i += executeEntityUpdate(annotationMetadata, queryString, entity);
                 }
                 return i;
-            });
-            return Optional.ofNullable(result);
+            }
+            int i = 0;
+            Session session = getCurrentSession();
+            for (T entity : operation) {
+                session.remove(entity);
+                i++;
+            }
+            return i;
+        });
+        return Optional.ofNullable(result);
+    }
+
+    private int executeEntityUpdate(AnnotationMetadata annotationMetadata, String queryString, Object entity) {
+        String[] parameters = annotationMetadata.stringValues(DataMethod.class, DataMethod.META_MEMBER_PARAMETER_BINDING_PATHS);
+        Query query = getCurrentSession().createQuery(queryString);
+        for (String parameter : parameters) {
+            query.setParameter(parameter, getParameterValue(parameter, entity));
         }
+        return query.executeUpdate();
+    }
+
+    private Object getParameterValue(String propertyName, Object value) {
+        for (String property : propertyName.split("\\.")) {
+            value = BeanWrapper.getWrapper(value).getRequiredProperty(property, Argument.OBJECT_ARGUMENT);
+        }
+        return value;
     }
 
     @NonNull
@@ -462,7 +591,6 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
         //noinspection ConstantConditions
         return transactionOperations.executeRead(status -> {
             String query = preparedQuery.getQuery();
-            Map<String, Object> parameterValues = preparedQuery.getParameterValues();
             Pageable pageable = preparedQuery.getPageable();
             Session currentSession = getCurrentSession();
             Class<R> resultType = preparedQuery.getResultType();
@@ -494,17 +622,17 @@ public class HibernateJpaOperations implements JpaRepositoryOperations, AsyncCap
                         bindParameters(nativeQuery, preparedQuery, query);
                         bindPageable(nativeQuery, pageable);
                         return nativeQuery.stream()
-                                  .map(tuple -> {
-                                      Object o = tuple.get(0);
-                                      if (wrapperType.isInstance(o)) {
-                                          return (R) o;
-                                      } else {
-                                          return ConversionService.SHARED.convertRequired(
-                                                  o,
-                                                  wrapperType
-                                          );
-                                      }
-                                  });
+                                .map(tuple -> {
+                                    Object o = tuple.get(0);
+                                    if (wrapperType.isInstance(o)) {
+                                        return (R) o;
+                                    } else {
+                                        return ConversionService.SHARED.convertRequired(
+                                                o,
+                                                wrapperType
+                                        );
+                                    }
+                                });
                     } else {
                         q = currentSession.createNativeQuery(query, wrapperType);
                     }

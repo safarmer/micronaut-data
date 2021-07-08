@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.tck.repositories;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.context.annotation.Parameter;
 import io.micronaut.data.annotation.Id;
 import io.micronaut.data.annotation.Query;
@@ -25,13 +25,15 @@ import io.micronaut.data.tck.entities.Person;
 import io.micronaut.data.tck.entities.PersonDto;
 import io.reactivex.*;
 
+import java.util.List;
+
 public interface PersonReactiveRepository extends RxJavaCrudRepository<Person, Long> {
 
     Single<Person> save(String name, int age);
 
     Single<Person> getById(Long id);
 
-    Completable updatePerson(@Id Long id, @Parameter("name") String name);
+    Single<Long> updatePerson(@Id Long id, @Parameter("name") String name);
 
     Flowable<Person> list(Pageable pageable);
 
@@ -46,9 +48,29 @@ public interface PersonReactiveRepository extends RxJavaCrudRepository<Person, L
 
     Single<Long> deleteByNameLike(String name);
 
-
     Observable<Person> findByNameLike(String name);
 
     @Query("SELECT MAX(id) FROM person WHERE id = -1")
     Maybe<Long> getMaxId();
+
+    Flowable<Person> updatePeople(List<Person> people);
+
+    @Query("UPDATE person SET name = :newName WHERE (name = :oldName)")
+    Maybe<Long> updateNamesCustom(String newName, String oldName);
+
+    @Query("INSERT INTO person(name, age, enabled) VALUES (:name, :age, TRUE)")
+    Single<Long> saveCustom(List<Person> people);
+
+    @Query("INSERT INTO person(name, age, enabled) VALUES (:name, :age, TRUE)")
+    Single<Long> saveCustomSingle(Person people);
+
+    @Query("DELETE FROM person WHERE name = :name")
+    Single<Long> deleteCustom(List<Person> people);
+
+    @Query("DELETE FROM person WHERE name = :name")
+    Single<Long> deleteCustomSingle(Person person);
+
+    @Query("DELETE FROM person WHERE name = :xyz")
+    Single<Long> deleteCustomSingleNoEntity(String xyz);
+
 }

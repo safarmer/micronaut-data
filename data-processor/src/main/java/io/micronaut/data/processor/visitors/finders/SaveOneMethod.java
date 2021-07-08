@@ -15,15 +15,13 @@
  */
 package io.micronaut.data.processor.visitors.finders;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.reflect.ClassUtils;
 import io.micronaut.core.util.ArrayUtils;
 import io.micronaut.core.util.CollectionUtils;
+import io.micronaut.data.annotation.MappedEntity;
 import io.micronaut.data.intercept.DataInterceptor;
-import io.micronaut.data.intercept.SaveOneInterceptor;
-import io.micronaut.data.intercept.async.SaveOneAsyncInterceptor;
-import io.micronaut.data.intercept.reactive.SaveOneReactiveInterceptor;
 import io.micronaut.data.model.PersistentProperty;
 import io.micronaut.data.model.query.QueryModel;
 import io.micronaut.data.processor.model.SourcePersistentEntity;
@@ -61,10 +59,9 @@ public class SaveOneMethod extends AbstractPatternBasedMethod {
     @Override
     public boolean isMethodMatch(@NonNull MethodElement methodElement, @NonNull MatchContext matchContext) {
         ParameterElement[] parameters = matchContext.getParameters();
-        return super.isMethodMatch(methodElement, matchContext) &&
-                SaveEntityMethod.isValidSaveReturnType(matchContext, true) &&
+        return super.isMethodMatch(methodElement, matchContext) && isValidSaveReturnType(matchContext, true) &&
                 parameters.length > 0 &&
-                !TypeUtils.isIterableOfEntity(parameters[0].getGenericType()) ;
+                !TypeUtils.isIterableOfEntity(parameters[0].getGenericType());
     }
 
     @Nullable
@@ -76,7 +73,7 @@ public class SaveOneMethod extends AbstractPatternBasedMethod {
         if (TypeUtils.isReactiveOrFuture(returnType)) {
             returnType = returnType.getFirstTypeArgument().orElse(null);
         }
-        if (returnType == null || !rootEntity.getName().equals(returnType.getName())) {
+        if (returnType == null || !TypeUtils.isNumber(returnType) && !rootEntity.getName().equals(returnType.getName())) {
             matchContext.fail("The return type of the save method must be the same as the root entity type: " + rootEntity.getName());
             return null;
         }
@@ -139,23 +136,13 @@ public class SaveOneMethod extends AbstractPatternBasedMethod {
             }
         }
 
-        final Class<? extends DataInterceptor> interceptor =
-                pickSaveInterceptor(matchContext.getReturnType());
-        if (matchContext.supportsImplicitQueries()) {
-            return new MethodMatchInfo(
-                    returnType,
-                    null,
-                    getInterceptorElement(matchContext, interceptor),
-                    MethodMatchInfo.OperationType.INSERT
-            );
-        } else {
-            return new MethodMatchInfo(
-                    returnType,
-                    QueryModel.from(matchContext.getRootEntity()),
-                    getInterceptorElement(matchContext, interceptor),
-                    MethodMatchInfo.OperationType.INSERT
-            );
-        }
+        Map.Entry<ClassElement, Class<? extends DataInterceptor>> e = FindersUtils.pickSaveOneInterceptor(matchContext, matchContext.getReturnType());
+        return new MethodMatchInfo(
+                e.getKey(),
+                QueryModel.from(matchContext.getRootEntity()),
+                getInterceptorElement(matchContext, e.getValue()),
+                MethodMatchInfo.OperationType.INSERT
+        );
     }
 
     private boolean isRequiredProperty(SourcePersistentProperty pp) {
@@ -164,19 +151,27 @@ public class SaveOneMethod extends AbstractPatternBasedMethod {
     }
 
     /**
-     * Pick a runtime interceptor to use based on the return type.
-     * @param returnType The return type
-     * @return The interceptor
+     * Is the return type valid for saving an entity.
+     * @param matchContext The match context
+     * @param entityArgumentNotRequired  If an entity arg is not required
+     * @return True if it is
      */
-    private static @NonNull Class<? extends DataInterceptor> pickSaveInterceptor(@NonNull ClassElement returnType) {
-        Class<? extends DataInterceptor> interceptor;
-        if (TypeUtils.isFutureType(returnType)) {
-            interceptor = SaveOneAsyncInterceptor.class;
-        } else if (TypeUtils.isReactiveOrFuture(returnType)) {
-            interceptor = SaveOneReactiveInterceptor.class;
-        } else {
-            interceptor = SaveOneInterceptor.class;
+    private static boolean isValidSaveReturnType(@NonNull MatchContext matchContext, boolean entityArgumentNotRequired) {
+        ClassElement returnType = matchContext.getReturnType();
+        if (TypeUtils.isVoid(returnType) || TypeUtils.isNumber(returnType)) {
+            return true;
         }
-        return interceptor;
+        if (TypeUtils.isReactiveOrFuture(returnType)) {
+            returnType = returnType.getFirstTypeArgument().orElse(null);
+        }
+        if (returnType == null) {
+            return false;
+        }
+        if (TypeUtils.isNumber(returnType)) {
+            return true;
+        }
+        return returnType.hasAnnotation(MappedEntity.class) &&
+                (entityArgumentNotRequired || returnType.getName().equals(matchContext.getParameters()[0].getGenericType().getName()));
     }
+
 }

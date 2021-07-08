@@ -70,7 +70,7 @@ class Test {
 
         where:
         dialect            | query
-        Dialect.ORACLE     | 'CREATE TABLE "TEST" ("ID" NUMBER(19) PRIMARY KEY GENERATED ALWAYS AS IDENTITY,"NAME" VARCHAR(255) NOT NULL)'
+        Dialect.ORACLE     | 'CREATE TABLE "TEST" ("ID" NUMBER(19) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,"NAME" VARCHAR(255) NOT NULL)'
         Dialect.H2         | 'CREATE TABLE `test` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY,`name` VARCHAR(255) NOT NULL);'
         Dialect.POSTGRES   | 'CREATE TABLE "test" ("id" BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,"name" VARCHAR(255) NOT NULL);'
         Dialect.SQL_SERVER | 'CREATE TABLE [test] ([id] BIGINT PRIMARY KEY IDENTITY(1,1) NOT NULL,[name] VARCHAR(255) NOT NULL);'
@@ -172,7 +172,7 @@ class Test {
 
         where:
         dialect            | query
-        Dialect.ORACLE     | 'CREATE TABLE "TEST" ("ID" VARCHAR(36) PRIMARY KEY NOT NULL DEFAULT SYS_GUID(),"NAME" VARCHAR(255) NOT NULL)'
+        Dialect.ORACLE     | 'CREATE TABLE "TEST" ("ID" VARCHAR(36) NOT NULL DEFAULT SYS_GUID() PRIMARY KEY,"NAME" VARCHAR(255) NOT NULL)'
         Dialect.H2         | 'CREATE TABLE `test` (`id` UUID NOT NULL DEFAULT random_uuid() PRIMARY KEY,`name` VARCHAR(255) NOT NULL);'
         Dialect.POSTGRES   | 'CREATE TABLE "test" ("id" UUID PRIMARY KEY NOT NULL DEFAULT uuid_generate_v4(),"name" VARCHAR(255) NOT NULL);'
         Dialect.SQL_SERVER | 'CREATE TABLE [test] ([id] UNIQUEIDENTIFIER PRIMARY KEY NOT NULL DEFAULT newid(),[name] VARCHAR(255) NOT NULL);'
@@ -334,10 +334,75 @@ interface TestBookPageRepository extends io.micronaut.data.tck.repositories.Book
 }
 """)
 
+        def method = beanDefinition.findPossibleMethods("save").findFirst().get()
         expect:
-        beanDefinition.findPossibleMethods("save")
-                .findFirst().get()
-                .stringValue(Query)
+
+            method.stringValue(Query)
                 .orElse(null) == 'INSERT INTO "shelf_book" ("shelf_id","book_id") VALUES (?,?)'
+            method.stringValues(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING + "Paths") ==
+                    ['name', 'age', 'enabled', 'publicId'] as String[]
+    }
+
+    void "test build SQL update"() {
+        given:
+            BeanDefinition beanDefinition = buildBeanDefinition('test.MyInterface' + BeanDefinitionVisitor.PROXY_SUFFIX, """
+package test;
+
+import io.micronaut.data.tck.entities.Food;
+import io.micronaut.data.annotation.*;
+import io.micronaut.data.repository.*;
+import io.micronaut.data.model.query.builder.sql.SqlQueryBuilder;
+import java.util.UUID;
+
+@Repository
+@RepositoryConfiguration(queryBuilder=SqlQueryBuilder.class, implicitQueries = false)
+@io.micronaut.context.annotation.Executable
+interface MyInterface extends CrudRepository<Food, UUID> {
+}
+""")
+
+        def method = beanDefinition.findPossibleMethods("update").findFirst().get()
+        expect:
+
+            method.stringValue(Query)
+                .orElse(null) == 'UPDATE "food" SET "key"=?,"carbohydrates"=?,"portion_grams"=?,"updated_on"=?,"fk_meal_id"=?,"fk_alt_meal"=? WHERE ("fid" = ?)'
+            method.stringValues(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING + "Paths") ==
+                    ["key", "carbohydrates", "portionGrams", "updatedOn", "meal.mid", "alternativeMeal.mid", ""] as String[]
+    }
+
+    void "test build custom SQL insert"() {
+        given:
+            BeanDefinition beanDefinition = buildBeanDefinition('test.MyInterface' + BeanDefinitionVisitor.PROXY_SUFFIX, """
+package test;
+
+import io.micronaut.data.tck.entities.Food;
+import io.micronaut.data.annotation.*;
+import io.micronaut.data.repository.*;
+import io.micronaut.data.model.query.builder.sql.SqlQueryBuilder;
+import java.util.UUID;
+
+@Repository
+@RepositoryConfiguration(queryBuilder=SqlQueryBuilder.class, implicitQueries = false)
+@io.micronaut.context.annotation.Executable
+interface MyInterface extends CrudRepository<Food, UUID> {
+
+    @Query("INSERT INTO food(key, carbohydrates) VALUES (:key, :carbohydrates)")
+    void saveCustom(java.util.List<Food> food);
+
+    @Query("INSERT INTO food(key, carbohydrates) VALUES (:key, :carbohydrates)")
+    void saveCustomSingle(Food food);
+
+}
+""")
+        when:
+        def saveCustom = beanDefinition.findPossibleMethods("saveCustom").findFirst().get()
+        then:
+        saveCustom.stringValue(Query, "rawQuery").orElse(null) == 'INSERT INTO food(key, carbohydrates) VALUES (?, ?)'
+        saveCustom.stringValues(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING_PATHS) == ["key", "carbohydrates"] as String[]
+        when:
+        def saveCustomSingle = beanDefinition.findPossibleMethods("saveCustomSingle").findFirst().get()
+        then:
+        saveCustomSingle.stringValue(Query, "rawQuery").orElse(null) == 'INSERT INTO food(key, carbohydrates) VALUES (?, ?)'
+        saveCustomSingle.stringValues(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING_PATHS) == ["key", "carbohydrates"] as String[]
     }
 }

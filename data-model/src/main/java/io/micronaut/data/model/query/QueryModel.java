@@ -15,8 +15,8 @@
  */
 package io.micronaut.data.model.query;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.data.annotation.Join;
 import io.micronaut.data.model.Association;
@@ -35,7 +35,11 @@ public interface QueryModel extends Criteria {
 
     @NonNull
     @Override
-    QueryModel idEquals(QueryParameter parameter);
+    QueryModel idEq(QueryParameter parameter);
+
+    @NonNull
+    @Override
+    QueryModel versionEq(QueryParameter parameter);
 
     @NonNull
     @Override
@@ -64,10 +68,6 @@ public interface QueryModel extends Criteria {
     @NonNull
     @Override
     QueryModel eq(String propertyName, QueryParameter parameter);
-
-    @NonNull
-    @Override
-    QueryModel idEq(QueryParameter parameter);
 
     @NonNull
     @Override
@@ -270,13 +270,26 @@ public interface QueryModel extends Criteria {
     /**
      * Join on the given association.
      * @param path The join path
-     * @param association The association, never null
+     * @param association The association
      * @param joinType The join type
      * @param alias The alias to use.
      * @return The query
      */
     @NonNull
-    JoinPath join(String path, @NonNull Association association, @NonNull Join.Type joinType, @Nullable String alias);
+    @Deprecated
+    JoinPath join(String path, Association association, @NonNull Join.Type joinType, @Nullable String alias);
+
+    /**
+     * Join on the given association.
+     * @param path The join path
+     * @param joinType The join type
+     * @param alias The alias to use.
+     * @return The query
+     */
+    @NonNull
+    default JoinPath join(String path, @NonNull Join.Type joinType, @Nullable String alias) {
+        return join(path, joinType, alias);
+    }
 
     /**
      * Join on the given association.
@@ -286,6 +299,9 @@ public interface QueryModel extends Criteria {
      */
     @NonNull
     default JoinPath join(@NonNull Association association, @NonNull Join.Type joinType) {
+        if (getPersistentEntity() != association.getOwner()) {
+            throw new IllegalArgumentException("The association " + association + " must be owned by: " + getPersistentEntity());
+        }
         return join(association.getName(), association, joinType, null);
     }
 
@@ -914,6 +930,22 @@ public interface QueryModel extends Criteria {
          */
         public IdEquals(QueryParameter value) {
             super(ID, value);
+        }
+    }
+
+    /**
+     * A criterion that restricts the results based on the equality of the version.
+     */
+    class VersionEquals extends PropertyCriterion {
+
+        private static final String VERSION = "version";
+
+        /**
+         * Default constructor.
+         * @param value The parameter
+         */
+        public VersionEquals(QueryParameter value) {
+            super(VERSION, value);
         }
     }
 

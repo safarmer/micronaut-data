@@ -15,8 +15,8 @@
  */
 package io.micronaut.data.processor.visitors.finders;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.naming.NameUtils;
 import io.micronaut.core.naming.Named;
 import io.micronaut.core.util.StringUtils;
@@ -249,7 +249,7 @@ public abstract class ProjectionMethodExpression {
         @Override
         protected ClassElement resolveExpectedType(@NonNull MethodMatchContext matchContext, @NonNull ClassElement classElement) {
             if (TypeUtils.isNumber(classElement)) {
-                return matchContext.getVisitorContext().getClassElement(Double.class)
+                return matchContext.getVisitorContext().getClassElement(Number.class)
                         .orElse(super.resolveExpectedType(matchContext, classElement));
             } else {
                 return super.resolveExpectedType(matchContext, classElement);

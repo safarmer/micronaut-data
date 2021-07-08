@@ -21,14 +21,16 @@ querying:
   async: Asynchronous Queries
   reactive: Reactive Queries
 dataUpdates:
-  title: Updating Data
+  title: Inserting and modifying data
+  inserts: Inserting
+  updates: Updating
+  deletes: Deleting
+  timestamps: Entity Timestamps
+  entityEvents: Entity Events
   transactions:
     title: Transactions
     programmaticTransactions: Programmatic Transactions
     transactionalEvents: Transactional Events
-  batchUpdates: Batch Updates
-  batchDeletes: Batch Deletes
-  timestamps: Entity Timestamps
 howItWorks:
   title: How Micronaut Data Works
 sql:
@@ -40,6 +42,7 @@ sql:
     jdbcRepositories:
       title: JDBC Repositories
       sqlInserts: Inserts and Updates
+      optimisticLocking: Optimistic locking
       pessimisticLocking: Pessimistic Locking
     sqlMapping:
       title: Mapping Entities
@@ -48,12 +51,21 @@ sql:
       sqlCompositeId: Composite Primary Keys
       sqlConstructorArguments: Constructor Arguments
       sqlNaming: SQL Naming Strategies
-      sqlAssociations: Association Fetching
+      sqlAssociationMapping: Association Mapping
+      sqlAssociationFetching: Association Fetching
       columnTransformer: Using @ColumnTransformer
       sqlJsonType: JSON Column Support
+      javaRecords: Support for Java 16 Records
+      kotlinData: Support for Kotlin immutable data classes
     jdbcJoinQueries: JDBC Join Queries
     jdbcDataTypes: JDBC Data Types
     jdbcNativeQueries: Explicit JDBC Queries
+  r2dbc:
+    title: Micronaut Data R2DBC
+    r2querying: Writing Queries
+    r2crud: Performing CRUD Operations
+    r2transactionManagement: Micronaut Data Transactions with R2DBC
+    r2entityEvents: Reactive & Entity Events
 graal:
   title: Going Native with GraalVM
 spring:

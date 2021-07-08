@@ -17,9 +17,10 @@ package io.micronaut.data.runtime.mapper;
 
 import java.math.BigDecimal;
 import java.util.Date;
+import java.util.UUID;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.convert.ConversionService;
 import io.micronaut.core.type.Argument;
 import io.micronaut.data.exceptions.DataAccessException;
@@ -102,9 +103,10 @@ public interface ResultReader<RS, IDX> {
             @NonNull DataType dataType) {
         switch (dataType) {
             case STRING:
-            case UUID:
             case JSON:
                 return readString(resultSet, index);
+            case UUID:
+                return readUUID(resultSet, index);
             case LONG:
                 return readLong(resultSet, index);
             case INTEGER:
@@ -183,6 +185,16 @@ public interface ResultReader<RS, IDX> {
      */
     default @Nullable String readString(RS resultSet, IDX name) {
         return getRequiredValue(resultSet, name, String.class);
+    }
+
+    /**
+     * Read a UUID value for the given name.
+     * @param resultSet The result set
+     * @param name The name (such as the column name)
+     * @return The string value
+     */
+    default @Nullable UUID readUUID(RS resultSet, IDX name) {
+        return getRequiredValue(resultSet, name, UUID.class);
     }
 
     /**

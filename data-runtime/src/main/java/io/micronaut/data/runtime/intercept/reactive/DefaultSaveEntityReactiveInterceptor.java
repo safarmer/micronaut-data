@@ -15,9 +15,12 @@
  */
 package io.micronaut.data.runtime.intercept.reactive;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
 import io.micronaut.core.async.publisher.Publishers;
+import io.micronaut.core.convert.ConversionService;
+import io.micronaut.core.type.Argument;
+import io.micronaut.core.type.ReturnType;
 import io.micronaut.data.intercept.RepositoryMethodKey;
 import io.micronaut.data.intercept.reactive.SaveEntityReactiveInterceptor;
 import io.micronaut.data.operations.RepositoryOperations;
@@ -41,7 +44,14 @@ public class DefaultSaveEntityReactiveInterceptor extends AbstractReactiveInterc
 
     @Override
     public Object intercept(RepositoryMethodKey methodKey, MethodInvocationContext<Object, Object> context) {
-        Publisher<Object> publisher = reactiveOperations.persist(getInsertOperation(context));
+        Object entity = getEntityParameter(context, Object.class);
+        Publisher<Object> publisher = reactiveOperations.persist(getInsertOperation(context, entity));
+        ReturnType<Object> rt = context.getReturnType();
+        Argument<?> reactiveValue = context.getReturnType().asArgument().getFirstTypeVariable().orElse(Argument.OBJECT_ARGUMENT);
+        if (isNumber(reactiveValue.getType())) {
+            return ConversionService.SHARED.convert(count(publisher), rt.getType())
+                    .orElseThrow(() -> new IllegalStateException("Unsupported return type: " + rt.getType()));
+        }
         return Publishers.convertPublisher(publisher, context.getReturnType().getType());
     }
 }

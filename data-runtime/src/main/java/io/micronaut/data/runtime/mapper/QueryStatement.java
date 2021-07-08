@@ -15,8 +15,8 @@
  */
 package io.micronaut.data.runtime.mapper;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.convert.ConversionService;
 import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.model.DataType;
@@ -222,6 +222,8 @@ public interface QueryStatement<PS, IDX> {
                                 case CHARACTER_ARRAY:
                                     value = convertRequired(value, String[].class);
                                     break;
+                                default:
+                                    // no-op
                             }
                         } else if (value.getClass() == Character[].class) {
                             value = convertRequired(value, String[].class);

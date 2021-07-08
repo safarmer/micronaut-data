@@ -16,12 +16,12 @@
 package io.micronaut.data.processor.visitors.finders;
 
 import io.micronaut.context.annotation.Parameter;
+import io.micronaut.data.annotation.AutoPopulated;
 import io.micronaut.data.annotation.Id;
 import io.micronaut.data.annotation.TypeRole;
+import io.micronaut.data.annotation.Version;
 import io.micronaut.data.intercept.DataInterceptor;
-import io.micronaut.data.intercept.UpdateInterceptor;
-import io.micronaut.data.intercept.async.UpdateAsyncInterceptor;
-import io.micronaut.data.intercept.reactive.UpdateReactiveInterceptor;
+import io.micronaut.data.model.PersistentProperty;
 import io.micronaut.data.model.query.QueryModel;
 import io.micronaut.data.model.query.QueryParameter;
 import io.micronaut.data.processor.model.SourcePersistentEntity;
@@ -30,11 +30,12 @@ import io.micronaut.data.processor.visitors.MatchContext;
 import io.micronaut.data.processor.visitors.MethodMatchContext;
 import io.micronaut.inject.ast.*;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -57,6 +58,11 @@ public class UpdateMethod extends AbstractPatternBasedMethod {
     @Override
     protected MethodMatchInfo.OperationType getOperationType() {
         return MethodMatchInfo.OperationType.UPDATE;
+    }
+
+    @Override
+    public int getOrder() {
+        return DEFAULT_POSITION - 150;
     }
 
     @Override
@@ -86,7 +92,7 @@ public class UpdateMethod extends AbstractPatternBasedMethod {
             @NonNull MethodMatchContext matchContext) {
         List<ParameterElement> parameters = matchContext.getParametersNotInRole();
         List<ParameterElement> remainingParameters = parameters.stream()
-                .filter(p -> !p.hasAnnotation(Id.class))
+                .filter(p -> !p.hasAnnotation(Id.class) && !p.hasAnnotation(Version.class))
                 .collect(Collectors.toList());
 
         ParameterElement idParameter = parameters.stream().filter(p -> p.hasAnnotation(Id.class)).findFirst()
@@ -97,25 +103,32 @@ public class UpdateMethod extends AbstractPatternBasedMethod {
         }
 
         SourcePersistentEntity entity = matchContext.getRootEntity();
-
-        SourcePersistentProperty identity = entity.getIdentity();
-        if (identity == null) {
-            matchContext.fail("Cannot update by ID for entity that has no ID");
-            return null;
-        } else {
+        // Validate @IdClass for composite entity
+        if (entity.hasIdentity()) {
+            SourcePersistentProperty identity = entity.getIdentity();
             String idType = TypeUtils.getTypeName(identity.getType());
             String idParameterType = TypeUtils.getTypeName(idParameter.getType());
             if (!idType.equals(idParameterType)) {
                 matchContext.fail("ID type of method [" + idParameterType + "] does not match ID type of entity: " + idType);
             }
+        } else {
+            matchContext.fail("Cannot update by ID for entity that has no ID");
         }
 
+        ParameterElement versionMatchMethodParameter = null;
 
         QueryModel query = QueryModel.from(entity);
-        query.idEq(new QueryParameter(idParameter.getName()));
-        List<String> properiesToUpdate = new ArrayList<>(remainingParameters.size());
+        query.idEq(new QueryParameter(getParameterName(idParameter)));
+        SourcePersistentProperty version = entity.getVersion();
+        if (version != null) {
+            versionMatchMethodParameter = parameters.stream().filter(p -> p.hasAnnotation(Version.class)).findFirst().orElse(null);
+            if (versionMatchMethodParameter != null) {
+                query.versionEq(new QueryParameter(getParameterName(versionMatchMethodParameter)));
+            }
+        }
+        List<String> propertiesToUpdate = new ArrayList<>(remainingParameters.size());
         for (ParameterElement parameter : remainingParameters) {
-            String name = parameter.stringValue(Parameter.class).orElse(parameter.getName());
+            String name = getParameterName(parameter);
             SourcePersistentProperty prop = entity.getPropertyByName(name);
             if (prop == null) {
                 matchContext.fail("Cannot update non-existent property: " + name);
@@ -125,50 +138,40 @@ public class UpdateMethod extends AbstractPatternBasedMethod {
                     matchContext.fail("Cannot update a generated property: " + name);
                     return null;
                 } else {
-                    properiesToUpdate.add(name);
+                    propertiesToUpdate.add(name);
                 }
             }
         }
 
-        Element element = matchContext.getParametersInRole().get(TypeRole.LAST_UPDATED_PROPERTY);
-        if (element instanceof PropertyElement) {
-            properiesToUpdate.add(element.getName());
+        entity.getPersistentProperties().stream()
+                .filter(p -> p != null && p.findAnnotation(AutoPopulated.class).map(ap -> ap.getRequiredValue(AutoPopulated.UPDATEABLE, Boolean.class)).orElse(false))
+                .map(PersistentProperty::getName)
+                .collect(Collectors.toCollection(() -> propertiesToUpdate));
+
+        if (versionMatchMethodParameter != null && entity.getVersion() != null) {
+            propertiesToUpdate.add(entity.getVersion().getName());
         }
 
         ClassElement returnType = matchContext.getReturnType();
-        Class<? extends DataInterceptor> interceptor = pickUpdateInterceptor(returnType);
-        if (TypeUtils.isReactiveOrFuture(returnType)) {
-            returnType = returnType.getGenericType().getFirstTypeArgument().orElse(returnType);
-        }
+        Map.Entry<ClassElement, Class<? extends DataInterceptor>> entry = FindersUtils.pickUpdateInterceptor(matchContext, returnType);
         MethodMatchInfo info = new MethodMatchInfo(
-                returnType,
+                entry.getKey(),
                 query,
-                getInterceptorElement(matchContext, interceptor),
+                getInterceptorElement(matchContext, entry.getValue()),
                 MethodMatchInfo.OperationType.UPDATE,
-                properiesToUpdate.toArray(new String[0])
+                propertiesToUpdate.stream().toArray(String[]::new)
         );
 
-        info.addParameterRole(
-                TypeRole.ID,
-                idParameter.getName()
-        );
+        info.addParameterRole(TypeRole.ID, getParameterName(idParameter));
+
+        if (versionMatchMethodParameter != null) {
+            info.setOptimisticLock(true);
+        }
         return info;
     }
 
-    /**
-     * Pick the correct delete all interceptor.
-     * @param returnType The return type
-     * @return The interceptor
-     */
-    static Class<? extends DataInterceptor> pickUpdateInterceptor(ClassElement returnType) {
-        Class<? extends DataInterceptor> interceptor;
-        if (TypeUtils.isFutureType(returnType)) {
-            interceptor = UpdateAsyncInterceptor.class;
-        } else if (TypeUtils.isReactiveType(returnType)) {
-            interceptor = UpdateReactiveInterceptor.class;
-        } else {
-            interceptor = UpdateInterceptor.class;
-        }
-        return interceptor;
+    private String getParameterName(ParameterElement p) {
+        return p.stringValue(Parameter.class).orElse(p.getName());
     }
+
 }

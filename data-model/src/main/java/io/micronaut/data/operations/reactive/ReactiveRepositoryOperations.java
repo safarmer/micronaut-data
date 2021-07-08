@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.operations.reactive;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.async.annotation.SingleResult;
 import io.micronaut.data.model.Page;
 import io.micronaut.data.model.runtime.*;
@@ -134,12 +134,23 @@ public interface ReactiveRepositoryOperations {
     @NonNull <T> Publisher<T> update(@NonNull UpdateOperation<T> operation);
 
     /**
+     * Updates the entities for the given operation.
+     *
+     * @param operation The operation
+     * @param <T> The generic type
+     * @return The updated entities
+     */
+    default @NonNull <T> Publisher<T> updateAll(@NonNull UpdateBatchOperation<T> operation) {
+        throw new UnsupportedOperationException("The updateAll is required to be implemented.");
+    }
+
+    /**
      * Persist all the given entities.
      * @param operation The batch operation
      * @param <T> The generic type
      * @return The entities, possibly mutated
      */
-    @NonNull <T> Publisher<T> persistAll(@NonNull BatchOperation<T> operation);
+    @NonNull <T> Publisher<T> persistAll(@NonNull InsertBatchOperation<T> operation);
 
     /**
      * Executes an update for the given query and parameter values. If it is possible to
@@ -154,14 +165,38 @@ public interface ReactiveRepositoryOperations {
     );
 
     /**
-     * Deletes all the entities of the given type.
+     * Executes a batch delete for the given query and parameter values. If it is possible to
+     * return the number of objects updated, then do so.
+     * @param preparedQuery The prepared query
+     * @return A publisher that emits a boolean true if the update was successful
+     */
+    @NonNull
+    @SingleResult
+    default Publisher<Number> executeDelete(
+            @NonNull PreparedQuery<?, Number> preparedQuery
+    ) {
+        return executeUpdate(preparedQuery);
+    }
+
+    /**
+     * Deletes the entity.
      * @param operation The batch operation
      * @param <T> The generic type
-     * @return A publisher that emits a boolean true if the update was successful
+     * @return A publisher that emits the number of entities deleted
      */
     @SingleResult
     @NonNull
-    <T> Publisher<Number> deleteAll(BatchOperation<T> operation);
+    <T> Publisher<Number> delete(@NonNull DeleteOperation<T> operation);
+
+    /**
+     * Deletes all the entities of the given type.
+     * @param operation The batch operation
+     * @param <T> The generic type
+     * @return A publisher that emits the number of entities deleted
+     */
+    @SingleResult
+    @NonNull
+    <T> Publisher<Number> deleteAll(@NonNull DeleteBatchOperation<T> operation);
 
     /**
      * Find a page for the given entity and pageable.
@@ -172,5 +207,4 @@ public interface ReactiveRepositoryOperations {
     @SingleResult
     @NonNull
     <R> Publisher<Page<R>> findPage(@NonNull PagedQuery<R> pagedQuery);
-
 }

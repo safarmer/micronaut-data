@@ -15,11 +15,12 @@
  */
 package io.micronaut.data.tck.entities;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.data.annotation.*;
 import io.micronaut.data.model.DataType;
 
 import java.util.Map;
+import java.util.Set;
 
 @MappedEntity
 public class Sale {
@@ -40,6 +41,11 @@ public class Sale {
     @TypeDef(type = DataType.JSON)
     @Nullable
     private Map<String, Integer> quantities;
+
+    @Relation(
+        value = Relation.Kind.ONE_TO_MANY,
+        mappedBy = "sale")
+    private Set<SaleItem> items;
 
     public Long getId() {
         return id;
@@ -79,5 +85,13 @@ public class Sale {
 
     public void setExtraData(String extraData) {
         this.extraData = extraData;
+    }
+
+    public Set<SaleItem> getItems() {
+        return items;
+    }
+
+    public void setItems(Set<SaleItem> items) {
+        this.items = items;
     }
 }

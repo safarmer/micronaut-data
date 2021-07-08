@@ -16,7 +16,9 @@
 package io.micronaut.data.tck.tests
 
 import io.micronaut.context.ApplicationContext
+import io.micronaut.core.util.CollectionUtils
 import io.micronaut.data.exceptions.EmptyResultException
+import io.micronaut.data.exceptions.OptimisticLockException
 import io.micronaut.data.model.Pageable
 import io.micronaut.data.model.Sort
 import io.micronaut.data.tck.entities.*
@@ -25,14 +27,19 @@ import io.micronaut.data.tck.jdbc.entities.UserRole
 import io.micronaut.data.tck.repositories.*
 import io.micronaut.transaction.SynchronousTransactionManager
 import spock.lang.AutoCleanup
+import spock.lang.Ignore
+import spock.lang.IgnoreIf
 import spock.lang.Shared
 import spock.lang.Specification
+import spock.lang.Timeout
+import spock.lang.Unroll
 
 import java.sql.Connection
 import java.time.LocalDate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+@Timeout(value = 20, unit = TimeUnit.SECONDS)
 abstract class AbstractRepositorySpec extends Specification {
 
     abstract PersonRepository getPersonRepository()
@@ -51,6 +58,9 @@ abstract class AbstractRepositorySpec extends Specification {
     abstract RoleRepository getRoleRepository()
     abstract MealRepository getMealRepository()
     abstract FoodRepository getFoodRepository()
+    abstract StudentRepository getStudentRepository()
+    abstract CarRepository getCarRepository()
+    abstract BasicTypesRepository getBasicTypeRepository()
 
     abstract Map<String, String> getProperties()
 
@@ -59,7 +69,7 @@ abstract class AbstractRepositorySpec extends Specification {
     ApplicationContext context = ApplicationContext.run(properties)
 
     @Shared
-    SynchronousTransactionManager<Connection> transactionManager = context.getBean(SynchronousTransactionManager)
+    Optional<SynchronousTransactionManager<Connection>> transactionManager = context.findBean(SynchronousTransactionManager)
 
     boolean isOracle() {
         return false
@@ -101,6 +111,10 @@ abstract class AbstractRepositorySpec extends Specification {
                 ))])
     }
 
+    protected void setup() {
+        cleanup()
+    }
+
     protected void cleanupBooks() {
         bookRepository.deleteAll()
         authorRepository.deleteAll()
@@ -115,6 +129,196 @@ abstract class AbstractRepositorySpec extends Specification {
     protected void cleanupMeals() {
         foodRepository.deleteAll()
         mealRepository.deleteAll()
+    }
+
+    def cleanup() {
+        cleanupBooks()
+        cleanupData()
+        cleanupMeals()
+    }
+
+    protected boolean skipQueryByDataArray() {
+        return false
+    }
+
+    @IgnoreIf({ jvm.isJava15Compatible() })
+    void "test save and retrieve basic types"() {
+        when: "we save a new book"
+        def book = basicTypeRepository.save(new BasicTypes())
+
+        then: "The ID is assigned"
+        book.myId != null
+
+        when:"A book is found"
+        def retrievedBook = basicTypeRepository.findById(book.myId).orElse(null)
+
+        then:"The book is correct"
+        retrievedBook.uuid == book.uuid
+        retrievedBook.bigDecimal == book.bigDecimal
+        retrievedBook.byteArray == book.byteArray
+        retrievedBook.charSequence == book.charSequence
+        retrievedBook.charset == book.charset
+        retrievedBook.primitiveBoolean == book.primitiveBoolean
+        retrievedBook.primitiveByte == book.primitiveByte
+        retrievedBook.primitiveChar == book.primitiveChar
+        retrievedBook.primitiveDouble == book.primitiveDouble
+        retrievedBook.primitiveFloat == book.primitiveFloat
+        retrievedBook.primitiveInteger == book.primitiveInteger
+        retrievedBook.primitiveLong == book.primitiveLong
+        retrievedBook.primitiveShort == book.primitiveShort
+        retrievedBook.wrapperBoolean == book.wrapperBoolean
+        retrievedBook.wrapperByte == book.wrapperByte
+        retrievedBook.wrapperChar == book.wrapperChar
+        retrievedBook.wrapperDouble == book.wrapperDouble
+        retrievedBook.wrapperFloat == book.wrapperFloat
+        retrievedBook.wrapperInteger == book.wrapperInteger
+        retrievedBook.wrapperLong == book.wrapperLong
+        retrievedBook.uri == book.uri
+        retrievedBook.url == book.url
+        retrievedBook.instant == book.instant
+        retrievedBook.localDateTime == book.localDateTime
+        retrievedBook.zonedDateTime == book.zonedDateTime
+        retrievedBook.offsetDateTime == book.offsetDateTime
+        retrievedBook.dateCreated == book.dateCreated
+        retrievedBook.dateUpdated == book.dateUpdated
+        // stored as a DATE type without time
+//        retrievedBook.date == book.date
+    }
+
+    @IgnoreIf({ !jvm.isJava11Compatible() })
+    void "test query by byte array"() {
+        if (skipQueryByDataArray()) {
+            return
+        }
+
+        when:
+            def book = basicTypeRepository.save(new BasicTypes())
+            def changed = "changed byte".bytes
+            basicTypeRepository.update(book.myId, changed)
+
+        then:
+            basicTypeRepository.findByByteArray(changed) != null
+    }
+
+    void "test save and fetch author with no books"() {
+        given:
+        def author = new Author(name: "Some Dude")
+        authorRepository.save(author)
+
+        author = authorRepository.queryByName("Some Dude")
+
+        expect:
+        author.books.size() == 0
+
+        cleanup:
+        authorRepository.deleteById(author.id)
+    }
+
+    void "test total dto"() {
+        given:
+        savePersons(["Jeff", "James"])
+
+        expect:
+        personRepository.getTotal().total == 2
+
+        cleanup:
+        personRepository.deleteAll()
+    }
+
+    protected boolean skipCustomSchemaAndCatalogTest() {
+        return false
+    }
+
+    void "test CRUD with custom schema and catalog"() {
+        if (skipCustomSchemaAndCatalogTest()) {
+            return
+        }
+        when:
+        def a5 = carRepository.save(new Car(name: "A5"))
+
+        then:
+        a5.id
+
+        when:
+        a5 = carRepository.findById(a5.id).orElse(null)
+
+        then:
+        a5.id
+        a5.name == 'A5'
+        carRepository.getById(a5.id).parts.size() == 0
+
+        when:"an update happens"
+        carRepository.update(a5.id, "A6")
+        a5 = carRepository.findById(a5.id).orElse(null)
+
+        then:"the updated worked"
+        a5.name == 'A6'
+
+        when:"an update to null happens"
+        carRepository.update(a5.id, null)
+        a5 = carRepository.findById(a5.id).orElse(null)
+
+        then:"the updated to null worked"
+            a5.name == null
+
+        when:"A deleted"
+        carRepository.deleteById(a5.id)
+
+        then:"It was deleted"
+        !carRepository.findById(a5.id).isPresent()
+        carRepository.deleteAll()
+    }
+
+    @Ignore("Fix indexed mapping for r2dbc")
+    void "test In Native Query function"() {
+        given:
+        savePersons(["Cemo", "Deniz", "Utku"])
+
+        when:"using a mix of parameters with collection types with IN queries"
+        def persons = personRepository.queryNames(
+            ["Ali"],
+            "James",
+            ["Onur"],
+            ["Cemo","Deniz","Olcay"],
+            "Utku");
+
+        then:"The result is correct"
+        persons != null
+        persons.size() == 3
+
+        then:
+        cleanupData()
+    }
+
+    void "test custom alias"() {
+        given:
+        saveSampleBooks()
+
+        when:
+        def book = bookRepository.queryByTitle("The Stand")
+
+        then:
+        book.title == "The Stand"
+        book.author != null
+        book.author.name == "Stephen King"
+
+        cleanup:
+        cleanupData()
+    }
+
+    void "test @Query with DTO"() {
+        given:
+        saveSampleBooks()
+
+        when:
+        def book = bookDtoRepository.findByTitleWithQuery("The Stand")
+
+        then:
+        book.isPresent()
+        book.get().title == "The Stand"
+
+        cleanup:
+        cleanupData()
     }
 
     void "test save one"() {
@@ -133,9 +337,6 @@ abstract class AbstractRepositorySpec extends Specification {
         personRepository.count() == 3
         personRepository.count("Fred") == 1
         personRepository.findAll().size() == 3
-
-        cleanup:
-        personRepository.deleteAll()
     }
 
     void "test save many"() {
@@ -157,9 +358,177 @@ abstract class AbstractRepositorySpec extends Specification {
         // Oracle 11g doesn't support pagination
         isOracle() || personRepository.list(Pageable.from(1)).isEmpty()
         isOracle() || personRepository.list(Pageable.from(0, 1)).size() == 1
+    }
 
-        cleanup:
-        personRepository.deleteAll()
+    void "test save many custom"() {
+        given:
+        savePersons(["Jeff", "James"])
+
+        when:"many are saved"
+        def r1 = personRepository.saveCustom("Frank", 0)
+        def r2 =  personRepository.saveCustom("Bob", 0)
+
+        then:"all are saved"
+        r1 == 1
+        r2 == 1
+        personRepository.findAll().size() == 4
+        personRepository.count() == 4
+        personRepository.count("Jeff") == 1
+
+        // Oracle 11g doesn't support pagination
+        isOracle() || personRepository.list(Pageable.from(1)).isEmpty()
+        isOracle() || personRepository.list(Pageable.from(0, 1)).size() == 1
+    }
+
+    void "test update many"() {
+        given:
+        savePersons(["Jeff", "James"])
+
+        when:
+        def people = personRepository.findAll().toList()
+        people.forEach() { it.name = it.name + " updated" }
+        personRepository.updateAll(people)
+        people = personRepository.findAll().toList()
+
+        then:
+        people.get(0).name.endsWith(" updated")
+        people.get(1).name.endsWith(" updated")
+
+        when:
+        people = personRepository.findAll().toList()
+        people.forEach() { it.name = it.name + " X" }
+        def peopleUpdated = personRepository.updatePeople(people)
+        people = personRepository.findAll().toList()
+
+        then:
+        peopleUpdated.size() == 2
+        people.get(0).name.endsWith(" X")
+        people.get(1).name.endsWith(" X")
+        peopleUpdated.get(0).name.endsWith(" X")
+        peopleUpdated.get(1).name.endsWith(" X")
+    }
+
+    void "test custom insert"() {
+        given:
+        personRepository.saveCustom([new Person(name: "Abc", age: 12), new Person(name: "Xyz", age: 22)])
+
+        when:
+        def people = personRepository.findAll().toList()
+
+        then:
+        people.size() == 2
+        people.get(0).name == "Abc"
+        people.get(1).name == "Xyz"
+        people.get(0).age == 12
+        people.get(1).age == 22
+    }
+
+    void "test custom single insert"() {
+        given:
+        personRepository.saveCustomSingle(new Person(name: "Abc", age: 12))
+
+        when:
+        def people = personRepository.findAll().toList()
+
+        then:
+        people.size() == 1
+        people.get(0).name == "Abc"
+    }
+
+    void "test custom update"() {
+        given:
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        personRepository.updateNamesCustom("Denis", "Dennis")
+        def people = personRepository.findAll().toList()
+
+        then:
+        people.count { it.name == "Dennis"} == 0
+        people.count { it.name == "Denis"} == 2
+    }
+
+    void "test custom update only names"() {
+        when:
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+        def people = personRepository.findAll().toList()
+        people.forEach {it.age = 100 }
+        personRepository.updateAll(people)
+        people = personRepository.findAll().toList()
+
+        then:
+        people.size() == 4
+        people.every{it.age > 0 }
+
+        when:
+        people.forEach() {
+            it.name = it.name + " updated"
+            it.age = -1
+        }
+        int updated = personRepository.updateCustomOnlyNames(people)
+        people = personRepository.findAll().toList()
+
+        then:
+        updated == 4
+        people.size() == 4
+        people.every {it.name.endsWith(" updated") }
+        people.every {it.age > 0 }
+    }
+
+    void "test custom delete"() {
+        given:
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList()
+        people.findAll {it.name == "Dennis"}.forEach{ it.name = "DoNotDelete"}
+        def deleted = personRepository.deleteCustom(people)
+        people = personRepository.findAll().toList()
+
+        then:
+        deleted == 2
+        people.size() == 2
+        people.count {it.name == "Dennis"}
+    }
+
+    void "test custom delete single"() {
+        given:
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList()
+        def jeff = people.find {it.name == "Jeff"}
+        def deleted = personRepository.deleteCustomSingle(jeff)
+        people = personRepository.findAll().toList()
+
+        then:
+        deleted == 1
+        people.size() == 3
+
+        when:
+        def james = people.find {it.name == "James"}
+        james.name = "DoNotDelete"
+        deleted = personRepository.deleteCustomSingle(james)
+        people = personRepository.findAll().toList()
+
+        then:
+        deleted == 0
+        people.size() == 3
+    }
+
+    void "test custom delete single no entity"() {
+        given:
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList()
+        def jeff = people.find {it.name == "Jeff"}
+        def deleted = personRepository.deleteCustomSingleNoEntity(jeff.getName())
+        people = personRepository.findAll().toList()
+
+        then:
+        deleted == 1
+        people.size() == 3
     }
 
     void "test delete by id"() {
@@ -180,9 +549,17 @@ abstract class AbstractRepositorySpec extends Specification {
         then:"They are really deleted"
         !personRepository.findById(person.id).isPresent()
         old(personRepository.count()) - 1 == personRepository.count()
+    }
 
-        cleanup:
-        personRepository.deleteAll()
+    void "test delete by id and author id"() {
+        given:
+        setupBooks()
+        def book = bookRepository.findByTitle("Pet Cemetery")
+        when:
+        int deleted = bookRepository.deleteByIdAndAuthorId(book.id, book.author.id)
+        then:
+        deleted == 1
+        !bookRepository.findById(book.id).isPresent()
     }
 
     void "test delete by multiple ids"() {
@@ -201,9 +578,6 @@ abstract class AbstractRepositorySpec extends Specification {
         then:"Only the correct people are deleted"
         old(personRepository.count()) - 2 == personRepository.count()
         people.every { !personRepository.findById(it.id).isPresent() }
-
-        cleanup:
-        personRepository.deleteAll()
     }
 
     void "test delete one"() {
@@ -257,9 +631,6 @@ abstract class AbstractRepositorySpec extends Specification {
         then:
         personRepository.findByName("Jack") == null
         personRepository.findByName("Jeffrey").age == 30
-
-        cleanup:
-        personRepository.deleteAll()
     }
 
     void "test delete all"() {
@@ -308,9 +679,6 @@ abstract class AbstractRepositorySpec extends Specification {
 
         then:
         result == 1
-
-        cleanup:
-        personRepository.deleteById(person.id)
     }
 
     void "test is null or empty"() {
@@ -324,9 +692,6 @@ abstract class AbstractRepositorySpec extends Specification {
         isOracle() || bookRepository.findByAuthorIsNotNull().size() == 6
         isOracle() || bookRepository.countByTitleIsEmpty() == 1
         isOracle() || bookRepository.countByTitleIsNotEmpty() == 7
-
-        cleanup:
-        cleanupBooks()
     }
 
     void "test order by association"() {
@@ -358,9 +723,6 @@ abstract class AbstractRepositorySpec extends Specification {
         authorRepository.findByNameStartsWith("S").name == "Stephen King"
         authorRepository.findByNameEndsWith("w").name == "Don Winslow"
         authorRepository.findByNameIgnoreCase("don winslow").name == "Don Winslow"
-
-        cleanup:
-        cleanupBooks()
     }
 
     void "test project on single property"() {
@@ -391,10 +753,6 @@ abstract class AbstractRepositorySpec extends Specification {
         personRepository.readAgeByNameLike("J%").sort() == [35,40]
         personRepository.findByNameLikeOrderByAge("J%")*.age == [35,40]
         personRepository.findByNameLikeOrderByAgeDesc("J%")*.age == [40,35]
-
-        cleanup:
-        personRepository.deleteAll()
-        cleanupBooks()
     }
 
     void "test dto projection"() {
@@ -433,9 +791,6 @@ abstract class AbstractRepositorySpec extends Specification {
         then:"The result is correct"
         dto instanceof BookDto
         dto.title == "The Stand"
-
-        cleanup:
-        cleanupBooks()
     }
 
     void "test null argument handling" () {
@@ -464,10 +819,6 @@ abstract class AbstractRepositorySpec extends Specification {
 
         then:
         author.nickName == null
-
-        cleanup:
-        personRepository.deleteAll()
-        cleanupBooks()
     }
 
     void "test project on single ended association"() {
@@ -487,9 +838,6 @@ abstract class AbstractRepositorySpec extends Specification {
         authorRepository.findByBooksTitle("The Stand").name == "Stephen King"
         authorRepository.findByBooksTitle("The Border").name == "Don Winslow"
         bookRepository.findByAuthorName("Stephen King").size() == 2
-
-        cleanup:
-        cleanupBooks()
     }
 
     void "test join on single ended association"() {
@@ -505,9 +853,6 @@ abstract class AbstractRepositorySpec extends Specification {
         book.author != null
         book.author.id != null
         book.author.name == "Stephen King"
-
-        cleanup:
-        cleanupBooks()
     }
 
     void "test join on many ended association"() {
@@ -524,15 +869,31 @@ abstract class AbstractRepositorySpec extends Specification {
         author.books.find { it.title == "Pet Cemetery"}
 
         when:
-        def authors = authorRepository.listAll()
+        def allAuthors = CollectionUtils.iterableToList(authorRepository.findAll())
 
         then:
-        authors.size() == 3
-        authors.collect { [authorName: it.name, books: it.books.size()] }.every { it.books == 2 }
+        allAuthors.size() == 3
+        allAuthors.collect {it.books }.every { it.isEmpty() }
+    }
 
+    @Unroll
+    void "test different join types on many ended association"(String methodName) {
+        given:
+            saveSampleBooks()
 
-        cleanup:
-        cleanupBooks()
+        when:
+            def authors = authorRepository."$methodName"()
+
+        then:
+            authors.size() == 3
+            authors.collect { [authorName: it.name, books: it.books.size()] }.every { it.books == 2 }
+
+        where:
+            methodName << [
+                    "listAll", // DEFAULT
+                    "findByIdIsNotNull", // LEFT_FETCH
+                    "findByNameIsNotNull" // RIGHT_FETCH
+            ]
     }
 
     void "test query across multiple associations"() {
@@ -601,11 +962,6 @@ abstract class AbstractRepositorySpec extends Specification {
         results[1].countryRegion.country.name == "Spain"
 
         when:"A join that uses a join table is executed"
-        //TODO: Figure out why this join fails on mysql
-        def specName = specificationContext.currentSpec.name
-        if (specName.contains("MySql") || specName.contains("Maria")) {
-            return
-        }
         def region = regionRepository.findByCitiesName("Bilbao")
 
         then:"The result is correct"
@@ -654,9 +1010,6 @@ abstract class AbstractRepositorySpec extends Specification {
 
         then:
         results.size() == 2
-
-        cleanup:
-        personRepository.deleteAll()
     }
 
 
@@ -748,14 +1101,33 @@ abstract class AbstractRepositorySpec extends Specification {
         author = authorRepository.save(author)
 
         then: "They are saved correctly"
-        println(author)
         author.id
+        book1.prePersist == 1
+        book1.postPersist == 1
+        book2.prePersist == 1
+        book2.postPersist == 1
+        book3.prePersist == 1
+        book3.postPersist == 1
+        book3.preUpdate == 0
+        book3.postUpdate == 0
+        book3.preRemove == 0
+        book3.postRemove == 0
+        book3.postLoad == 0
 
         when:"retrieving an author"
         author = authorRepository.findById(author.id).orElse(null)
 
         then:"the associations are correct"
         author.getBooks().size() == 3
+        author.getBooks()[0].postLoad == 1
+        author.getBooks()[1].postLoad == 1
+        author.getBooks()[2].postLoad == 1
+        author.getBooks()[0].prePersist == 0
+        author.getBooks()[0].postPersist == 0
+        author.getBooks()[0].preUpdate == 0
+        author.getBooks()[0].postUpdate == 0
+        author.getBooks()[0].preRemove == 0
+        author.getBooks()[0].postRemove == 0
 
         def result1 = author.getBooks().find {book -> book.title == "Book1" }
         result1.pages.size() == 1
@@ -772,9 +1144,18 @@ abstract class AbstractRepositorySpec extends Specification {
         result3.pages.find {page -> page.num = 32}
         result3.pages.find {page -> page.num = 33}
 
-        cleanup:
-        bookRepository.deleteAll()
-        authorRepository.deleteAll()
+        when:
+        authorRepository.delete(author)
+        then:
+        author.getBooks().size() == 3
+        author.getBooks()[0].postLoad == 1
+        author.getBooks()[0].prePersist == 0
+        author.getBooks()[0].postPersist == 0
+        author.getBooks()[0].preUpdate == 0
+        author.getBooks()[0].postUpdate == 0
+//     TODO: Consider whether to support cascade removes
+//        author.getBooks()[0].preRemove == 1
+//        author.getBooks()[0].postRemove == 1
     }
 
     void "test one-to-one mappedBy"() {
@@ -855,6 +1236,11 @@ abstract class AbstractRepositorySpec extends Specification {
 
         then:
         userRoleRepository.count() == 2
+
+        cleanup:
+        userRepository.deleteAll()
+        roleRepository.deleteAll()
+        userRoleRepository.deleteAll()
     }
 
     void "test finding authors by book"() {
@@ -887,17 +1273,20 @@ abstract class AbstractRepositorySpec extends Specification {
     }
 
     void "test find one for update"() {
+        if (!transactionManager.isPresent()) {
+            return
+        }
         given:
         def meal = mealRepository.save(new Meal(10))
         def food = foodRepository.save(new Food("food", 80, 200, meal))
 
         when:
-        def mealById = transactionManager.executeWrite { mealRepository.findByIdForUpdate(meal.mid) }
+        def mealById = transactionManager.get().executeWrite { mealRepository.findByIdForUpdate(meal.mid) }
         then:
         meal.currentBloodGlucose == mealById.currentBloodGlucose
 
         when: "finding with associations"
-        def mealWithFood = transactionManager.executeWrite { mealRepository.searchByIdForUpdate(meal.mid) }
+        def mealWithFood = transactionManager.get().executeWrite { mealRepository.searchByIdForUpdate(meal.mid) }
         then: "the association is fetched"
         food.carbohydrates == mealWithFood.foods.first().carbohydrates
 
@@ -906,6 +1295,10 @@ abstract class AbstractRepositorySpec extends Specification {
     }
 
     void "test find many for update"() {
+        if (!transactionManager.isPresent()) {
+            return
+        }
+
         given:
         def meals = mealRepository.saveAll([
                 new Meal(10),
@@ -915,7 +1308,7 @@ abstract class AbstractRepositorySpec extends Specification {
         foodRepository.saveAll(meals.collect { new Food("food", 10, 100, it) })
 
         when:
-        def mealsForUpdate = transactionManager.executeWrite { forUpdateMethod.call(*args) }
+        def mealsForUpdate = transactionManager.get().executeWrite { forUpdateMethod.call(*args) }
 
         then:
         mealsForUpdate.collect { it.currentBloodGlucose }.sort() ==
@@ -932,6 +1325,10 @@ abstract class AbstractRepositorySpec extends Specification {
     }
 
     void "test find for update locking"() {
+        if (!transactionManager.isPresent()) {
+            return
+        }
+
         given:
         def meal = mealRepository.save(new Meal(10))
         def threadCount = 2
@@ -940,7 +1337,7 @@ abstract class AbstractRepositorySpec extends Specification {
         def latch = new CountDownLatch(threadCount)
         (1..threadCount).collect {
             Thread.start {
-                transactionManager.executeWrite {
+                transactionManager.get().executeWrite {
                     def mealToUpdate = mealRepository.findByIdForUpdate(meal.mid)
                     latch.countDown()
                     latch.await(5, TimeUnit.SECONDS)
@@ -958,6 +1355,9 @@ abstract class AbstractRepositorySpec extends Specification {
     }
 
     void "test find for update locking with associations"() {
+        if (!transactionManager.isPresent()) {
+            return
+        }
         given:
         def meal = mealRepository.save(new Meal(10))
         foodRepository.save(new Food("food", 80, 200, meal))
@@ -967,7 +1367,7 @@ abstract class AbstractRepositorySpec extends Specification {
         def latch = new CountDownLatch(threadCount)
         (1..threadCount).collect {
             Thread.start {
-                transactionManager.executeWrite {
+                transactionManager.get().executeWrite {
                     def food = foodRepository.findByMealMidForUpdate(meal.mid)
                     def mealToUpdate = food.meal
                     latch.countDown()
@@ -1056,6 +1456,130 @@ abstract class AbstractRepositorySpec extends Specification {
             books12.size() == 1
         cleanup:
             cleanupBooks()
+    }
+
+    boolean skipOptimisticLockingTest() {
+        return false
+    }
+
+    def "test optimistic locking"() {
+        if (skipOptimisticLockingTest()) {
+            return
+        }
+        given:
+            def student = new Student("Denis")
+        when:
+            studentRepository.save(student)
+        then:
+            student.version == 0
+        when:
+            student = studentRepository.findById(student.getId()).get()
+        then:
+            student.version == 0
+        when:
+            student.setVersion(5)
+            student.setName("Xyz")
+            studentRepository.update(student)
+        then:
+            def e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            studentRepository.updateByIdAndVersion(student.getId(), student.getVersion(), student.getName())
+        then:
+            e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            studentRepository.delete(student)
+        then:
+            e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            studentRepository.deleteByIdAndVersionAndName(student.getId(), student.getVersion(), student.getName())
+        then:
+            e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            studentRepository.deleteByIdAndVersion(student.getId(), student.getVersion())
+        then:
+            e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            studentRepository.deleteAll([student])
+        then:
+            e = thrown(OptimisticLockException)
+            e.message == "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            student = studentRepository.findById(student.getId()).get()
+        then:
+            student.name == "Denis"
+            student.version == 0
+        when:
+            student.setName("Abc")
+            studentRepository.update(student)
+            def student2 = studentRepository.findById(student.getId()).get()
+        then:
+            student.version == 1
+            student2.name == "Abc"
+            student2.version == 1
+        when:
+            studentRepository.updateByIdAndVersion(student2.getId(), student2.getVersion(), "Joe")
+            def student3 = studentRepository.findById(student2.getId()).get()
+        then:
+            student3.name == "Joe"
+            student3.version == 2
+        when:
+            studentRepository.updateById(student2.getId(), "Joe2")
+            def student4 = studentRepository.findById(student2.getId()).get()
+        then:
+            student4.name == "Joe2"
+            student4.version == 2
+        when:
+            studentRepository.deleteByIdAndVersionAndName(student4.getId(), student4.getVersion(), student4.getName())
+            def student5 = studentRepository.findById(student2.getId())
+        then:
+            !student5.isPresent()
+        when:
+            student = new Student("Denis2")
+            studentRepository.save(student)
+            studentRepository.update(student)
+            studentRepository.update(student)
+            studentRepository.update(student)
+        then:
+            student.version == 3
+        when:
+            student = studentRepository.findById(student.getId()).orElseThrow()
+        then:
+            student.version == 3
+        when:
+            studentRepository.delete(student)
+        then:
+            !studentRepository.findById(student.getId()).isPresent()
+        cleanup:
+            studentRepository.deleteAll()
+    }
+
+    void "test update relation custom query"() {
+        given:
+            setupBooks()
+        when:
+            def book = bookRepository.findAllByTitleStartingWith("Along Came a Spider").first()
+            def author = authorRepository.searchByName("Stephen King")
+            bookRepository.updateAuthorCustom(book.id, author)
+            book = bookRepository.findById(book.id).get()
+        then:
+            book.author.id == book.author.id
+    }
+
+    void "test update relation"() {
+        given:
+            setupBooks()
+        when:
+            def book = bookRepository.findAllByTitleStartingWith("Along Came a Spider").first()
+            def author = authorRepository.searchByName("Stephen King")
+            bookRepository.updateAuthor(book.id, author)
+            book = bookRepository.findById(book.id).get()
+        then:
+            book.author.id == book.author.id
     }
 
     private GregorianCalendar getYearMonthDay(Date dateCreated) {

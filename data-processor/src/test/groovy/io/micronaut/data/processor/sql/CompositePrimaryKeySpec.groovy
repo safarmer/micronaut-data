@@ -49,11 +49,13 @@ interface CompanyRepository extends io.micronaut.data.tck.repositories.CompanyRe
 }
 """)
         def updateMethod = repository.findPossibleMethods("update").findFirst().get()
-        def updatePaths = updateMethod.getValue(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING + "Paths", String[].class).get()
+        def updatePaths = updateMethod.getValue(DataMethod, DataMethod.META_MEMBER_PARAMETER_BINDING_PATHS, String[].class).get()
+        def autoPopulatedPropertyPaths = updateMethod.getValue(DataMethod, DataMethod.META_MEMBER_PARAMETER_AUTO_POPULATED_PROPERTY_PATHS, String[].class).get()
 
         expect:"The repository compiles"
         repository != null
-        updatePaths == ['', "lastUpdated", ""] as String[]
+        updatePaths == ['', "", ""] as String[]
+        autoPopulatedPropertyPaths == ['', "lastUpdated", ""] as String[]
     }
 
     void "test compile repository"() {
@@ -131,7 +133,7 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
 
         where:
         methodName               | query
-        'findRoleByUser'         | 'SELECT user_role_id_role_."id",user_role_id_role_."name" FROM "user_role" user_role_ INNER JOIN "role" user_role_id_role_ ON user_role_."id_role"=user_role_id_role_."id" WHERE (user_role_.id_user = ?)'
+        'findRoleByUser'         | 'SELECT user_role_id_role_."id",user_role_id_role_."name" FROM "user_role" user_role_ INNER JOIN "role" user_role_id_role_ ON user_role_."id_role_id"=user_role_id_role_."id" WHERE (user_role_."id_user_id" = ?)'
     }
 
     void "test create table"() {
@@ -142,7 +144,7 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
         def sql = builder.buildBatchCreateTableStatement(entity)
 
         then:
-        sql == 'CREATE TABLE "project" ("department_id" INT NOT NULL,"project_id_project_id" INT NOT NULL,"name" VARCHAR(255) NOT NULL, PRIMARY KEY("department_id","project_id_project_id"));'
+        sql == 'CREATE TABLE "project" ("department_id" INT NOT NULL,"project_id_project_id" INT AUTO_INCREMENT,"name" VARCHAR(255) NOT NULL, PRIMARY KEY("department_id","project_id_project_id"));'
     }
 
     void "test build insert"() {
@@ -153,7 +155,7 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
         def sql = builder.buildInsert(AnnotationMetadata.EMPTY_METADATA, entity).query
 
         then:
-        sql == 'INSERT INTO "project" ("name","department_id","project_id_project_id") VALUES (?,?,?)'
+        sql == 'INSERT INTO "project" ("name","department_id") VALUES (?,?)'
     }
 
     void "test build query"() {
@@ -167,7 +169,7 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
         def sql = builder.buildQuery(model).query
 
         then:
-        sql.endsWith('WHERE (project_.department_id = ? AND project_.project_id_project_id = ?)')
+        sql == 'SELECT project_."department_id",project_."project_id_project_id",project_."name" FROM "project" project_ WHERE (project_."department_id" = ? AND project_."project_id_project_id" = ?)'
     }
 
     void "test build query projection"() {
@@ -183,7 +185,7 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
         def sql = builder.buildQuery(model).query
 
         then:
-        sql.startsWith('SELECT project_."department_id", project_."project_id_project_id"')
+        sql.startsWith('SELECT project_."department_id",project_."project_id_project_id"')
 
         when:"an id project ins used"
         model = QueryModel.from(entity)
@@ -193,6 +195,6 @@ interface UserRoleRepository extends GenericRepository<UserRole, UserRoleId> {
         sql = builder.buildQuery(model).query
 
         then:
-        sql.startsWith('SELECT project_."department_id", project_."project_id_project_id"')
+        sql.startsWith('SELECT project_."department_id",project_."project_id_project_id"')
     }
 }

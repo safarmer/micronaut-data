@@ -1,11 +1,12 @@
+import java.time.Duration
+
 buildscript {
     repositories {
-        jcenter()
-        maven { url "https://dl.bintray.com/micronaut/core-releases-local" }
-        maven { url "https://repo.grails.org/grails/core" }
+        mavenCentral()
+        gradlePluginPortal()
     }
     dependencies {
-        classpath "io.micronaut.build:micronaut-gradle-plugins:2.0.15"
+        classpath "io.micronaut.build.internal:micronaut-gradle-plugins:4.0.0.RC5"
     }
 }
 
@@ -20,9 +21,9 @@ subprojects { Project subproject ->
         if (subproject.name != 'data-tck') {
             skipDocumentation = false
         }
-        apply plugin: "io.micronaut.build.common"
-        apply plugin: "io.micronaut.build.dependency-updates"
-        apply plugin: "io.micronaut.build.publishing"
+        apply plugin: "io.micronaut.build.internal.common"
+        apply plugin: "io.micronaut.build.internal.dependency-updates"
+        apply plugin: "io.micronaut.build.internal.publishing"
 
         micronautBuild {
             resolutionStrategy {
@@ -37,7 +38,7 @@ subprojects { Project subproject ->
                     '-parameters',
                     // enables incremental compilation
                     '-Amicronaut.processing.incremental=true',
-                    '-Amicronaut.processing.annotations=io.micronaut.data.*',
+                    '-Amicronaut.processing.annotations=io.micronaut.data.*,io.micronaut.core.annotation.*,javax.persistence.*',
                     "-Amicronaut.processing.group=$project.group",
                     "-Amicronaut.processing.module=$project.name",
             ])
@@ -53,8 +54,8 @@ subprojects { Project subproject ->
     } else {
         apply plugin: "java-platform"
         version projectVersion
-        apply plugin: "io.micronaut.build.dependency-updates"
-        apply plugin: "io.micronaut.build.publishing"
+        apply plugin: "io.micronaut.build.internal.dependency-updates"
+        apply plugin: "io.micronaut.build.internal.publishing"
 
     }
 
@@ -62,6 +63,7 @@ subprojects { Project subproject ->
         if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_15)) {
             jvmArgs "--enable-preview"
         }
+        timeout = Duration.ofHours(1)
     }
 
     if (subproject.name != 'data-bom') {
@@ -78,10 +80,11 @@ subprojects { Project subproject ->
             if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_15)) {
                 jvmArgs "--enable-preview"
             }
+            timeout = Duration.ofHours(1)
         }
     }
     
 }
 
-apply plugin: "io.micronaut.build.docs"
-apply plugin: "io.micronaut.build.dependency-updates"
+apply plugin: "io.micronaut.build.internal.docs"
+apply plugin: "io.micronaut.build.internal.dependency-updates"

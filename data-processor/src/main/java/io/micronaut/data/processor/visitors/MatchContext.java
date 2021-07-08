@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.processor.visitors;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.AnnotationMetadata;
 import io.micronaut.core.annotation.AnnotationMetadataProvider;
 import io.micronaut.data.annotation.RepositoryConfiguration;
@@ -144,6 +144,15 @@ public class MatchContext implements AnnotationMetadataProvider {
     public void fail(@NonNull String message) {
         this.failing = true;
         getVisitorContext().fail(getUnableToImplementMessage() + message, getMethodElement());
+    }
+
+    /**
+     * Fail compilation with the given message for the current method.
+     * @param message The message
+     */
+    public void failAndThrow(@NonNull String message) {
+        fail(message);
+        throw new MatchFailedException();
     }
 
     /**

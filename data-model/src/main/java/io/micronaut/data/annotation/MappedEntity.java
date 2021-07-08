@@ -15,6 +15,7 @@
  */
 package io.micronaut.data.annotation;
 
+import io.micronaut.context.annotation.AliasFor;
 import io.micronaut.core.annotation.Introspected;
 import io.micronaut.data.model.naming.NamingStrategies;
 import io.micronaut.data.model.naming.NamingStrategy;
@@ -53,10 +54,16 @@ public @interface MappedEntity {
     /**
      * @return The naming strategy to use.
      */
+    @AliasFor(annotation = io.micronaut.data.annotation.NamingStrategy.class, member = "value")
     Class<? extends NamingStrategy> namingStrategy() default NamingStrategies.UnderScoreSeparatedLowerCase.class;
 
     /**
      * @return Whether to escape identifiers in generated queries. Defaults to true.
      */
     boolean escape() default true;
+
+    /**
+     * @return The alias to use for the query
+     */
+    String alias() default "";
 }

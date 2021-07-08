@@ -15,8 +15,6 @@
  */
 package io.micronaut.data.jdbc.annotation;
 
-import io.micronaut.data.annotation.MappedProperty;
-
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
@@ -43,5 +41,15 @@ public @interface JoinTable {
     /**
      * @return The join columns to use.
      */
-    MappedProperty[] joinColumns() default {};
+    JoinColumn[] joinColumns() default {};
+
+    /**
+     * @return The inverse join columns to use.
+     */
+    JoinColumn[] inverseJoinColumns() default {};
+
+    /**
+     * @return The alias to use for the query
+     */
+    String alias() default "";
 }

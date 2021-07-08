@@ -15,20 +15,23 @@
  */
 package io.micronaut.data.tck.repositories;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.context.annotation.Parameter;
 import io.micronaut.data.annotation.Id;
 import io.micronaut.data.annotation.Join;
 import io.micronaut.data.repository.CrudRepository;
 import io.micronaut.data.tck.entities.Author;
 
-import javax.annotation.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import javax.validation.constraints.NotNull;
 
 import java.util.List;
 import java.util.Optional;
 
 public interface AuthorRepository extends CrudRepository<Author, Long> {
+
+    @Join(value = "books", type = Join.Type.LEFT_FETCH)
+    Author queryByName(String name);
 
     @NonNull
     @Override
@@ -54,8 +57,16 @@ public interface AuthorRepository extends CrudRepository<Author, Long> {
     @Join("books")
     Author searchByName(String name);
 
+    // Various list all authors with different join types:
+
     @Join("books")
     List<Author> listAll();
+
+    @Join(value = "books", type = Join.Type.LEFT_FETCH)
+    List<Author> findByIdIsNotNull();
+
+    @Join(value = "books", type = Join.Type.RIGHT_FETCH)
+    List<Author> findByNameIsNotNull();
 
     void updateNickname(@Id Long id, @Parameter("nickName") @Nullable String nickName);
 }

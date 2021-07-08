@@ -23,8 +23,8 @@ import io.micronaut.data.annotation.Embeddable;
 import io.micronaut.data.model.naming.NamingStrategy;
 import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -53,6 +53,24 @@ public interface PersistentEntity extends PersistentElement {
      */
     @NonNull
     String getAliasName();
+
+    /**
+     * Has composite identity.
+     *
+     * @return The true if composite identity present
+     */
+    default boolean hasCompositeIdentity() {
+        return getCompositeIdentity() != null;
+    }
+
+    /**
+     * Has identity.
+     *
+     * @return The true if identity present
+     */
+    default boolean hasIdentity() {
+        return getIdentity() != null;
+    }
 
     /**
      * The composite id.
@@ -97,7 +115,13 @@ public interface PersistentEntity extends PersistentElement {
      * @return A list of associations
      */
     @NonNull
-    Collection<? extends Association> getAssociations();
+    default Collection<? extends Association> getAssociations() {
+        return getPersistentProperties()
+                .stream()
+                .filter(bp -> bp instanceof Association)
+                .map(bp -> (Association) bp)
+                .collect(Collectors.toList());
+    }
 
     /**
      * A list of embedded associations for this entity. This is typically
@@ -105,7 +129,12 @@ public interface PersistentEntity extends PersistentElement {
      *
      * @return A list of associations
      */
-    @NonNull Collection<Embedded> getEmbedded();
+    default @NonNull Collection<Embedded> getEmbedded() {
+        return getPersistentProperties().stream()
+                .filter(p -> p instanceof Embedded)
+                .map(p -> (Embedded) p)
+                .collect(Collectors.toList());
+    }
 
     /**
      * Obtains a PersistentProperty instance by name.
@@ -114,6 +143,28 @@ public interface PersistentEntity extends PersistentElement {
      * @return The PersistentProperty or null if it doesn't exist
      */
     @Nullable PersistentProperty getPropertyByName(String name);
+
+    /**
+     * Obtains an identity PersistentProperty instance by name.
+     *
+     * @param name The name of the identity property
+     * @return The PersistentProperty or null if it doesn't exist
+     */
+    default @Nullable PersistentProperty getIdentityByName(String name) {
+        PersistentProperty identity = getIdentity();
+        if (identity != null && identity.getName().equals(name)) {
+            return identity;
+        }
+        PersistentProperty[] compositeIdentities = getCompositeIdentity();
+        if (compositeIdentities != null) {
+            for (PersistentProperty compositeIdentity : compositeIdentities) {
+                if (compositeIdentity.getName().equals(name)) {
+                    return compositeIdentity;
+                }
+            }
+        }
+        return null;
+    }
 
     /**
      * A list of property names that a persistent.
@@ -188,13 +239,15 @@ public interface PersistentEntity extends PersistentElement {
                     }
                 }
                 if (sp != null) {
-                    b.append(name);
-                    if (i.hasNext()) {
-                        b.append('.');
-                    }
                     if (sp instanceof Association) {
+                        b.append(name);
+                        if (i.hasNext()) {
+                            b.append('.');
+                        }
                         currentEntity = ((Association) sp).getAssociatedEntity();
                         name = null;
+                    } else if (!i.hasNext()) {
+                        b.append(name);
                     }
                 }
             }
@@ -252,17 +305,72 @@ public interface PersistentEntity extends PersistentElement {
                     PersistentProperty identity = startingEntity.getIdentity();
                     if (identity != null && identity.getName().equals(token)) {
                         prop = identity;
-                        if (prop instanceof Association) {
-                            startingEntity = ((Association) prop).getAssociatedEntity();
-                        }
                     } else {
                         return Optional.empty();
                     }
-                } else if (prop instanceof Association) {
+                }
+                if (prop instanceof Association) {
                     startingEntity = ((Association) prop).getAssociatedEntity();
                 }
             }
             return Optional.ofNullable(prop);
+        }
+    }
+
+    /**
+     * Return a {@link PersistentPropertyPath} by path such as {@code foo.bar.prop}.
+     * .
+     * @param path The path
+     * @return The properties
+     */
+    @Nullable
+    default PersistentPropertyPath getPropertyPath(@NonNull String path) {
+        if (path.indexOf('.') == -1) {
+            PersistentProperty pp = getPropertyByName(path);
+            if (pp == null) {
+                PersistentProperty identity = getIdentity();
+                if (identity != null) {
+                    if (identity.getName().equals(path)) {
+                        pp = identity;
+                    } else if (identity instanceof Embedded) {
+                        PersistentEntity idEntity = ((Embedded) identity).getAssociatedEntity();
+                        pp = idEntity.getPropertyByName(path);
+                        if (pp != null) {
+                            return new PersistentPropertyPath(Collections.singletonList((Embedded) identity), pp, identity.getName() + "." + pp.getName());
+                        }
+                    }
+                }
+                PersistentProperty version = getVersion();
+                if (version != null) {
+                    if (version.getName().equals(path)) {
+                        pp = version;
+                    }
+                }
+            }
+            return pp == null ? null : new PersistentPropertyPath(Collections.emptyList(), pp, path);
+        } else {
+            String[] tokens = path.split("\\.");
+            List<Association> associations = new ArrayList<>(tokens.length);
+            PersistentEntity startingEntity = this;
+            for (int i = 0; i < tokens.length - 1; i++) {
+                String token = tokens[i];
+                PersistentProperty prop = startingEntity.getPropertyByName(token);
+                if (prop instanceof Association) {
+                    Association association = (Association) prop;
+                    startingEntity = association.getAssociatedEntity();
+                    associations.add(association);
+                } else {
+                    if (prop == null) {
+                        return null;
+                    }
+                    throw new IllegalArgumentException("Invalid association path. Property [" + token + "] of [" + startingEntity + "] is not an association in [" + path + "]");
+                }
+            }
+            PersistentProperty prop = startingEntity.getPropertyByName(tokens[tokens.length - 1]);
+            if (prop == null) {
+                return null;
+            }
+            return new PersistentPropertyPath(associations, prop, path);
         }
     }
 
@@ -272,6 +380,13 @@ public interface PersistentEntity extends PersistentElement {
      */
     @NonNull
     NamingStrategy getNamingStrategy();
+
+    /**
+     * Find the naming strategy that is defined for the entity.
+     * @return The optional naming strategy
+     */
+    @NonNull
+    Optional<NamingStrategy> findNamingStrategy();
 
     /**
      * Creates a new persistent entity representation of the given type. The type

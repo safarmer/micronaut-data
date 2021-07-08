@@ -15,8 +15,10 @@
  */
 package io.micronaut.data.runtime.intercept.async;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
+import io.micronaut.core.convert.ConversionService;
+import io.micronaut.core.type.Argument;
 import io.micronaut.data.intercept.RepositoryMethodKey;
 import io.micronaut.data.intercept.async.UpdateEntityAsyncInterceptor;
 import io.micronaut.data.operations.RepositoryOperations;
@@ -42,6 +44,12 @@ public class DefaultUpdateEntityAsyncInterceptor<T> extends AbstractAsyncInterce
 
     @Override
     public CompletionStage<Object> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Object>> context) {
-        return asyncDatastoreOperations.update(getUpdateOperation(context));
+        Object entity = getEntityParameter(context, Object.class);
+        CompletionStage<Object> cs = asyncDatastoreOperations.update(getUpdateOperation(context, entity));
+        Argument<Object> csValueArgument = (Argument<Object>) context.getReturnType().getFirstTypeVariable().orElse(Argument.listOf(Object.class));
+        if (isNumber(csValueArgument.getType())) {
+            return cs.thenApply(it -> ConversionService.SHARED.convertRequired(it == null ? 0 : 1, csValueArgument));
+        }
+        return cs;
     }
 }

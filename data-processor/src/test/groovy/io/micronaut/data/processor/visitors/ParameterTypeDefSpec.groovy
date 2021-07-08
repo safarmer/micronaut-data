@@ -16,8 +16,8 @@
 package io.micronaut.data.processor.visitors
 
 
-import io.micronaut.data.annotation.TypeDef
 import io.micronaut.data.intercept.annotation.DataMethod
+import io.micronaut.data.model.DataType
 
 class ParameterTypeDefSpec extends AbstractDataSpec {
 
@@ -67,9 +67,63 @@ class Person {
         repository.getRequiredMethod("deleteAll", Iterable)
                 .getAnnotationMetadata()
                 .getAnnotation(DataMethod)
-                .stringValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS)[0] == 'ENTITY'
+                .stringValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS).length == 0
 
 
+    }
+
+    void "test parameter type for query"() {
+        given:
+        def repository = buildRepository('test.BookRepository', '''
+import io.micronaut.data.model.query.builder.sql.SqlQueryBuilder;
+
+@RepositoryConfiguration(
+    queryBuilder = SqlQueryBuilder.class,
+    implicitQueries = false,
+    namedParameters = false
+)
+@Repository
+@io.micronaut.context.annotation.Executable
+abstract class BookRepository extends io.micronaut.data.tck.repositories.BookRepository {
+
+    public BookRepository(io.micronaut.data.tck.repositories.AuthorRepository authorRepository) {
+        super(authorRepository);
+    }
+
+    @Query(value = "select count(*) from book b where b.title like :title and b.total_pages > :pages", nativeQuery = true)
+    abstract int countNativeByTitleWithPagesGreaterThan(String title, int pages);
+}
+
+''')
+
+        when:
+        def values = repository.getRequiredMethod("countNativeByTitleWithPagesGreaterThan", String.class, int.class)
+                .getAnnotationMetadata()
+                .getAnnotation(DataMethod)
+                .enumValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS, DataType)
+        then:
+        values.size() == 2
+        values[0] == DataType.STRING
+        values[1] == DataType.INTEGER
+
+        when:
+        values = repository.getRequiredMethod("listNativeBooksWithTitleInCollection", Collection.class)
+                .getAnnotationMetadata()
+                .getAnnotation(DataMethod)
+                .enumValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS, DataType)
+        then:
+        values.size() == 1
+        values[0] == DataType.STRING
+
+        when:
+        values = repository.getRequiredMethod("listNativeBooksNullableListAsStringArray", List.class)
+                .getAnnotationMetadata()
+                .getAnnotation(DataMethod)
+                .enumValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS, DataType)
+        then:
+        values.size() == 2
+        values[0] == DataType.STRING_ARRAY
+        values[1] == DataType.STRING_ARRAY
     }
 
     void "test parameter type entities"() {
@@ -110,7 +164,7 @@ class Person {
         repository.getRequiredMethod("deleteAll", Iterable)
                 .getAnnotationMetadata()
                 .getAnnotation(DataMethod)
-                .stringValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS)[0] == 'ENTITY'
+                .stringValues(DataMethod.META_MEMBER_PARAMETER_TYPE_DEFS).length == 0
 
 
     }

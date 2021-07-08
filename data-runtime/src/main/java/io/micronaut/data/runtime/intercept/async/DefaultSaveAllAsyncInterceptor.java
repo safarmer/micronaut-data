@@ -15,11 +15,11 @@
  */
 package io.micronaut.data.runtime.intercept.async;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
-import io.micronaut.core.util.ArrayUtils;
+import io.micronaut.core.convert.ConversionService;
+import io.micronaut.core.type.Argument;
 import io.micronaut.data.intercept.RepositoryMethodKey;
-import io.micronaut.data.model.runtime.BatchOperation;
 import io.micronaut.data.operations.RepositoryOperations;
 import io.micronaut.data.intercept.async.SaveAllAsyncInterceptor;
 
@@ -31,7 +31,7 @@ import java.util.concurrent.CompletionStage;
  * @author graemerocher
  * @since 1.0.0
  */
-public class DefaultSaveAllAsyncInterceptor<T> extends AbstractAsyncInterceptor<T, Iterable<Object>> implements SaveAllAsyncInterceptor<T> {
+public class DefaultSaveAllAsyncInterceptor<T> extends AbstractAsyncInterceptor<T, Object> implements SaveAllAsyncInterceptor<T> {
     /**
      * Default constructor.
      *
@@ -42,14 +42,14 @@ public class DefaultSaveAllAsyncInterceptor<T> extends AbstractAsyncInterceptor<
     }
 
     @Override
-    public CompletionStage<Iterable<Object>> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Iterable<Object>>> context) {
-        Object[] parameterValues = context.getParameterValues();
-        if (ArrayUtils.isNotEmpty(parameterValues) && parameterValues[0] instanceof Iterable) {
-            //noinspection unchecked
-            BatchOperation<Object> batchOperation = getBatchOperation(context, (Iterable<Object>) parameterValues[0]);
-            return asyncDatastoreOperations.persistAll(batchOperation);
-        } else {
-            throw new IllegalArgumentException("First argument should be an iterable");
+    public CompletionStage<Object> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Object>> context) {
+        Iterable<Object> iterable = getEntitiesParameter(context, Object.class);
+        CompletionStage<Iterable<Object>> cs = asyncDatastoreOperations.persistAll(getInsertBatchOperation(context, iterable));
+        Argument<?> csValueArgument = context.getReturnType().getFirstTypeVariable().orElse(Argument.OBJECT_ARGUMENT);
+        if (isNumber(csValueArgument.getType())) {
+            return cs.thenApply(it -> ConversionService.SHARED.convertRequired(count(it), csValueArgument));
         }
+        return (CompletionStage) cs;
     }
 }
+

@@ -33,6 +33,7 @@ import java.lang.annotation.*;
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.METHOD, ElementType.FIELD, ElementType.ANNOTATION_TYPE})
 @Documented
+@Inherited
 public @interface TypeRole {
     /**
      * The parameter that is used for pagination.
@@ -55,8 +56,14 @@ public @interface TypeRole {
     String ENTITY = "entity";
 
     /**
+     * The parameter that defines an iterable of the entity instances.
+     */
+    String ENTITIES = "entities";
+
+    /**
      * The last updated property of the entity for an update operation.
      */
+    @Deprecated
     String LAST_UPDATED_PROPERTY = "lastUpdatedProperty";
 
     /**

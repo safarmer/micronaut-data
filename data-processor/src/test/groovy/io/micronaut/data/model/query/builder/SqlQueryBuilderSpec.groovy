@@ -21,6 +21,7 @@ import io.micronaut.data.annotation.Join
 import io.micronaut.data.model.Association
 import io.micronaut.data.model.PersistentEntity
 import io.micronaut.data.model.Sort
+import io.micronaut.data.model.entities.Bike
 import io.micronaut.data.model.entities.Person
 import io.micronaut.data.model.entities.PersonAssignedId
 import io.micronaut.data.model.naming.NamingStrategies
@@ -29,15 +30,22 @@ import io.micronaut.data.model.query.QueryModel
 import io.micronaut.data.model.query.QueryParameter
 import io.micronaut.data.model.query.builder.sql.Dialect
 import io.micronaut.data.model.query.builder.sql.SqlQueryBuilder
+import io.micronaut.data.model.query.factory.Projections
 import io.micronaut.data.model.runtime.RuntimePersistentEntity
 import io.micronaut.data.tck.entities.Book
 import io.micronaut.data.tck.entities.Car
+import io.micronaut.data.tck.entities.Challenge
 import io.micronaut.data.tck.entities.City
 import io.micronaut.data.tck.entities.CountryRegion
+import io.micronaut.data.tck.entities.Meal
 import io.micronaut.data.tck.entities.Restaurant
 import io.micronaut.data.tck.entities.Sale
+import io.micronaut.data.tck.entities.Shipment
+import io.micronaut.data.tck.entities.UuidEntity
+import io.micronaut.data.tck.jdbc.entities.Project
+import io.micronaut.data.tck.jdbc.entities.UserRole
 import spock.lang.Requires
-import spock.lang.Specification
+import spock.lang.Shared
 import spock.lang.Unroll
 
 class SqlQueryBuilderSpec extends AbstractTypeElementSpec {
@@ -85,7 +93,6 @@ interface MyRepository {
         builder.buildDelete(queryModel).query == 'DELETE  FROM sale  WHERE (name = $1)'
         builder.buildUpdate(queryModel, Arrays.asList("name")).query == 'UPDATE sale SET name=$1 WHERE (name = $2)'
         builder.buildInsert(annotationMetadata, entity).query == 'INSERT INTO sale (name,data,quantities,extra_data) VALUES ($1,to_json($2::json),to_json($3::json),to_json($4::json))'
-
     }
 
 
@@ -149,7 +156,6 @@ interface MyRepository {
         expect:
         encodedQuery != null
         encodedQuery.query == "DELETE  FROM `person`  WHERE (`id` = ?)"
-
     }
 
     @Unroll
@@ -210,7 +216,7 @@ interface MyRepository {
 
     void "test encode insert statement - custom mapping strategy"() {
         given:
-        PersistentEntity entity = new RuntimePersistentEntity(CountryRegion)
+        PersistentEntity entity = getRuntimePersistentEntity(CountryRegion)
         QueryBuilder encoder = new SqlQueryBuilder()
         def result = encoder.buildInsert(AnnotationMetadata.EMPTY_METADATA, entity)
 
@@ -313,4 +319,158 @@ interface MyRepository {
         Person | 'ge'   | 'name'   | '>='     | 'avg'
         Person | 'le'   | 'name'   | '<='     | 'distinct'
     }
+
+    @Unroll
+    void "test build query embedded"() {
+        when:
+            QueryBuilder encoder = new SqlQueryBuilder()
+            QueryResult encodedQuery = encoder.buildQuery(queryModel)
+
+        then:
+            encodedQuery.query == query
+
+        where:
+            queryModel << [
+                    QueryModel.from(getRuntimePersistentEntity(Shipment)).idEq(new QueryParameter("xyz")),
+                    QueryModel.from(getRuntimePersistentEntity(Shipment)).eq("shipmentId.country", new QueryParameter("xyz")),
+                    {
+                        def entity = getRuntimePersistentEntity(UserRole)
+                        def qm = QueryModel.from(entity)
+                        qm.join("role", entity.getPropertyByPath("id.role").get() as Association, Join.Type.DEFAULT, null)
+                        qm
+                    }.call(),
+                    {
+                        def entity = getRuntimePersistentEntity(UserRole)
+                        def qm = QueryModel.from(entity)
+                        qm.join("user", entity.getPropertyByPath("id.user").get() as Association, Join.Type.DEFAULT, null)
+                        qm.eq("user", new QueryParameter("xyz"))
+                    }.call(),
+                    QueryModel.from(getRuntimePersistentEntity(UuidEntity)).idEq(new QueryParameter("xyz")),
+                    QueryModel.from(getRuntimePersistentEntity(UserRole)).idEq(new QueryParameter("xyz")),
+                    {
+                        def entity = getRuntimePersistentEntity(Challenge)
+                        def qm = QueryModel.from(entity)
+                        qm.join("authentication", null, Join.Type.FETCH, null)
+                        qm.join("authentication.device", null, Join.Type.FETCH, null)
+                        qm.join("authentication.device.user", null, Join.Type.FETCH, null)
+                        qm.idEq(new QueryParameter("xyz"))
+                        qm
+                    }.call(),
+                    {
+                        def entity = getRuntimePersistentEntity(UserRole)
+                        def qm = QueryModel.from(entity)
+                        qm.projections().add(Projections.property("role"))
+                        qm.join("role", null, Join.Type.FETCH, null)
+                        qm.eq("user", new QueryParameter("xyz"))
+                        qm
+                    }.call(),
+                    {
+                        def entity = getRuntimePersistentEntity(Meal)
+                        def qm = QueryModel.from(entity)
+                        qm.join("foods", null, Join.Type.FETCH, null)
+                        qm.idEq(new QueryParameter("xyz"))
+                        qm
+                    }.call()
+            ]
+            query << [
+                    'SELECT shipment_."sp_country",shipment_."sp_city",shipment_."field" FROM "Shipment1" shipment_ WHERE (shipment_."sp_country" = ? AND shipment_."sp_city" = ?)',
+                    'SELECT shipment_."sp_country",shipment_."sp_city",shipment_."field" FROM "Shipment1" shipment_ WHERE (shipment_."sp_country" = ?)',
+                    'SELECT user_role_."id_user_id",user_role_."id_role_id" FROM "user_role_composite" user_role_ INNER JOIN "role_composite" user_role_id_role_ ON user_role_."id_role_id"=user_role_id_role_."id"',
+                    'SELECT user_role_."id_user_id",user_role_."id_role_id" FROM "user_role_composite" user_role_ INNER JOIN "user_composite" user_role_id_user_ ON user_role_."id_user_id"=user_role_id_user_."id" WHERE (user_role_."id_user_id" = ?)',
+                    'SELECT uidx."uuid",uidx."name",uidx."child_id",uidx."xyz",uidx."embedded_child_embedded_child2_id" FROM "uuid_entity" uidx WHERE (uidx."uuid" = ?)',
+                    'SELECT user_role_."id_user_id",user_role_."id_role_id" FROM "user_role_composite" user_role_ WHERE (user_role_."id_user_id" = ? AND user_role_."id_role_id" = ?)',
+                    'SELECT challenge_."id",challenge_."token",challenge_."authentication_id",challenge_authentication_device_."NAME" AS authentication_device_NAME,challenge_authentication_device_."USER_ID" AS authentication_device_USER_ID,challenge_authentication_device_user_."NAME" AS authentication_device_user_NAME,challenge_authentication_."DESCRIPTION" AS authentication_DESCRIPTION,challenge_authentication_."DEVICE_ID" AS authentication_DEVICE_ID FROM "challenge" challenge_ INNER JOIN "AUTHENTICATION" challenge_authentication_ ON challenge_."authentication_id"=challenge_authentication_."ID" INNER JOIN "DEVICE" challenge_authentication_device_ ON challenge_authentication_."DEVICE_ID"=challenge_authentication_device_."ID" INNER JOIN "USER" challenge_authentication_device_user_ ON challenge_authentication_device_."USER_ID"=challenge_authentication_device_user_."ID" WHERE (challenge_."id" = ?)',
+                    'SELECT user_role_id_role_."id",user_role_id_role_."name" FROM "user_role_composite" user_role_ INNER JOIN "role_composite" user_role_id_role_ ON user_role_."id_role_id"=user_role_id_role_."id" WHERE (user_role_."id_user_id" = ?)',
+                    'SELECT meal_."mid",meal_."current_blood_glucose",meal_."created_on",meal_."updated_on",meal_foods_."fid" AS foods_fid,meal_foods_."key" AS foods_key,meal_foods_."carbohydrates" AS foods_carbohydrates,meal_foods_."portion_grams" AS foods_portion_grams,meal_foods_."created_on" AS foods_created_on,meal_foods_."updated_on" AS foods_updated_on,meal_foods_."fk_meal_id" AS foods_fk_meal_id,meal_foods_."fk_alt_meal" AS foods_fk_alt_meal FROM "meal" meal_ INNER JOIN "food" meal_foods_ ON meal_."mid"=meal_foods_."fk_meal_id" WHERE (meal_."mid" = ?)'
+            ]
+    }
+
+    @Unroll
+    void "test build insert embedded"() {
+        when:
+            QueryBuilder encoder = new SqlQueryBuilder()
+            QueryResult encodedQuery = encoder.buildInsert(entity.getAnnotationMetadata(), entity)
+
+        then:
+            encodedQuery.query == query
+
+        where:
+            entity << [
+                    getRuntimePersistentEntity(Shipment),
+                    getRuntimePersistentEntity(UuidEntity),
+                    getRuntimePersistentEntity(UserRole)
+            ]
+            query << [
+                    'INSERT INTO "Shipment1" ("field","sp_country","sp_city") VALUES (?,?,?)',
+                    'INSERT INTO "uuid_entity" ("name","child_id","xyz","embedded_child_embedded_child2_id","uuid") VALUES (?,?,?,?,?)',
+                    'INSERT INTO "user_role_composite" ("id_user_id","id_role_id") VALUES (?,?)'
+            ]
+    }
+
+    @Unroll
+    void "test build create embedded"() {
+        when:
+            QueryBuilder encoder = new SqlQueryBuilder()
+            def statements = encoder.buildCreateTableStatements(entity)
+
+        then:
+            statements.join("\n") == query
+
+        where:
+            entity << [
+                    getRuntimePersistentEntity(Shipment),
+                    getRuntimePersistentEntity(UuidEntity),
+                    getRuntimePersistentEntity(UserRole)
+            ]
+            query << [
+                    'CREATE TABLE "Shipment1" ("sp_country" VARCHAR(255) NOT NULL,"sp_city" VARCHAR(255) NOT NULL,"field" VARCHAR(255) NOT NULL, PRIMARY KEY("sp_country","sp_city"));',
+                    'CREATE TABLE "uuid_entity" ("uuid" UUID,"name" VARCHAR(255) NOT NULL,"child_id" UUID,"xyz" UUID,"embedded_child_embedded_child2_id" UUID);',
+                    'CREATE TABLE "user_role_composite" ("id_user_id" BIGINT NOT NULL,"id_role_id" BIGINT NOT NULL, PRIMARY KEY("id_user_id","id_role_id"));'
+            ]
+    }
+
+    void "test build composite id query"() {
+        when:
+            QueryBuilder encoder = new SqlQueryBuilder()
+            def q = encoder.buildQuery(QueryModel.from(getRuntimePersistentEntity(Project)).idEq(new QueryParameter("xyz")))
+
+        then:
+            q.query == 'SELECT project_."project_id_department_id",project_."project_id_project_id",LOWER(project_.name) AS name,project_.name AS db_name,UPPER(project_.org) AS org FROM "project" project_ WHERE (project_."project_id_department_id" = ? AND project_."project_id_project_id" = ?)'
+            q.parameters == [
+                    '1': 'xyz.departmentId',
+                    '2': 'xyz.projectId'
+            ]
+    }
+
+    void "test insert statement with version"() {
+        given:
+            PersistentEntity entity = new RuntimePersistentEntity(Bike)
+            QueryBuilder encoder = new SqlQueryBuilder()
+
+        when:
+            def insertResult = encoder.buildInsert(AnnotationMetadata.EMPTY_METADATA, entity)
+
+        then:
+            insertResult.query == 'INSERT INTO "bike" ("name","age","enabled","public_id","version") VALUES (?,?,?,?,?)'
+            insertResult.parameters.equals('1': 'name', '2': 'age', '3': "enabled", '4': 'publicId', '5': "version")
+    }
+
+    @Shared
+    Map<Class, RuntimePersistentEntity> entities = [:]
+
+    // entities have instance compare in some cases
+    RuntimePersistentEntity getRuntimePersistentEntity(Class type) {
+        RuntimePersistentEntity entity = entities.get(type)
+        if (entity == null) {
+            entity = new RuntimePersistentEntity(type) {
+                @Override
+                protected RuntimePersistentEntity getEntity(Class t) {
+                    return getRuntimePersistentEntity(t)
+                }
+            }
+            entities.put(type, entity)
+        }
+        return entity
+    }
+
 }

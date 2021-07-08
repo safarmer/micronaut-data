@@ -15,12 +15,11 @@
  */
 package io.micronaut.data.processor.visitors.finders;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.context.annotation.Parameter;
 import io.micronaut.core.util.CollectionUtils;
-import io.micronaut.core.util.StringUtils;
-import io.micronaut.data.annotation.Query;
-import io.micronaut.data.annotation.TypeRole;
+import io.micronaut.data.annotation.AutoPopulated;
+import io.micronaut.data.model.PersistentProperty;
 import io.micronaut.data.model.query.QueryModel;
 import io.micronaut.data.model.query.QueryParameter;
 import io.micronaut.data.processor.model.SourcePersistentEntity;
@@ -28,7 +27,7 @@ import io.micronaut.data.processor.visitors.MatchContext;
 import io.micronaut.data.processor.visitors.MethodMatchContext;
 import io.micronaut.inject.ast.*;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -66,15 +65,6 @@ public class UpdateByMethod extends DynamicFinder {
         return false;
     }
 
-    @Override
-    protected boolean hasQueryAnnotation(@NonNull MethodElement methodElement) {
-        final String str = methodElement.stringValue(Query.class).orElse(null);
-        if (StringUtils.isNotEmpty(str)) {
-            return str.trim().toLowerCase(Locale.ENGLISH).startsWith("update");
-        }
-        return false;
-    }
-
     @Nullable
     @Override
     protected MethodMatchInfo buildInfo(
@@ -89,56 +79,66 @@ public class UpdateByMethod extends DynamicFinder {
             matchContext.fail("Projections are not supported on batch updates");
             return null;
         }
-        String[] updateProperties;
-        if (!(query instanceof RawQuery)) {
+        List<QueryModel.Criterion> criterionList = query.getCriteria().getCriteria();
+        if (CollectionUtils.isEmpty(criterionList)) {
+            matchContext.fail("Cannot implement batch update operation that doesn't perform a query");
+            return null;
+        }
 
-            List<QueryModel.Criterion> criterionList = query.getCriteria().getCriteria();
-            if (CollectionUtils.isEmpty(criterionList)) {
-                matchContext.fail("Cannot implement batch update operation that doesn't perform a query");
-                return null;
-            }
-            Set<String> queryParameters = new HashSet<>();
-            for (QueryModel.Criterion criterion : criterionList) {
-                if (criterion instanceof QueryModel.PropertyCriterion) {
-                    QueryModel.PropertyCriterion pc = (QueryModel.PropertyCriterion) criterion;
-                    Object v = pc.getValue();
-                    if (v instanceof QueryParameter) {
-                        queryParameters.add(((QueryParameter) v).getName());
+        final SourcePersistentEntity rootEntity = matchContext.getRootEntity();
+
+        Set<String> queryParameters = new HashSet<>();
+        QueryParameter versionMatchMethodParameter = null;
+        for (QueryModel.Criterion criterion : criterionList) {
+            if (criterion instanceof QueryModel.PropertyCriterion) {
+                QueryModel.PropertyCriterion pc = (QueryModel.PropertyCriterion) criterion;
+                Object v = pc.getValue();
+                if (v instanceof QueryParameter) {
+                    QueryParameter queryParameter = (QueryParameter) v;
+                    queryParameters.add(queryParameter.getName());
+                    if (criterion instanceof QueryModel.VersionEquals) {
+                        versionMatchMethodParameter = queryParameter;
                     }
                 }
             }
-            List<Element> updateParameters = matchContext.getParametersNotInRole().stream().filter(p -> !queryParameters.contains(p.getName()))
-                    .collect(Collectors.toList());
-            if (CollectionUtils.isEmpty(updateParameters)) {
-                matchContext.fail("At least one parameter required to update");
-                return null;
-            }
-            Element element = matchContext.getParametersInRole().get(TypeRole.LAST_UPDATED_PROPERTY);
-            if (element instanceof PropertyElement) {
-                updateParameters.add(element);
-            }
-            SourcePersistentEntity entity = matchContext.getRootEntity();
-            updateProperties = new String[updateParameters.size()];
-            for (int i = 0; i < updateProperties.length; i++) {
-                Element parameter = updateParameters.get(i);
-                String parameterName = parameter.stringValue(Parameter.class).orElse(parameter.getName());
-                Optional<String> path = entity.getPath(parameterName);
-                if (path.isPresent()) {
-                    updateProperties[i] = path.get();
-                } else {
-                    matchContext.fail("Cannot perform batch update for non-existent property: " + parameterName);
-                    return null;
-                }
-            }
-        } else {
-            updateProperties = StringUtils.EMPTY_STRING_ARRAY;
         }
+        SourcePersistentEntity entity = matchContext.getRootEntity();
+
+        List<String> updateProperties = matchContext.getParametersNotInRole()
+                .stream()
+                .map(p -> p.stringValue(Parameter.class).orElse(p.getName()))
+                .filter(parameterName -> !queryParameters.contains(parameterName))
+                .map(parameterName -> {
+                    Optional<String> path = entity.getPath(parameterName);
+                    if (path.isPresent()) {
+                        return path.get();
+                    } else {
+                        matchContext.fail("Cannot perform batch update for non-existent property: " + parameterName);
+                        return null;
+                    }
+                })
+                .collect(Collectors.toList());
+
+        rootEntity.getPersistentProperties().stream()
+                .filter(p -> p != null && p.findAnnotation(AutoPopulated.class).map(ap -> ap.getRequiredValue(AutoPopulated.UPDATEABLE, Boolean.class)).orElse(false))
+                .map(PersistentProperty::getName)
+                .collect(Collectors.toCollection(() -> updateProperties));
+
+        if (versionMatchMethodParameter != null && entity.getVersion() != null) {
+            updateProperties.add(entity.getVersion().getName());
+        }
+
+        if (CollectionUtils.isEmpty(updateProperties)) {
+            matchContext.fail("At least one parameter required to update");
+            return null;
+        }
+
         return new MethodMatchInfo(
                 queryResultType,
                 query,
-                getInterceptorElement(matchContext, UpdateMethod.pickUpdateInterceptor(matchContext.getReturnType())),
+                getInterceptorElement(matchContext, FindersUtils.pickUpdateInterceptor(matchContext, matchContext.getReturnType()).getValue()),
                 MethodMatchInfo.OperationType.UPDATE,
-                updateProperties
+                updateProperties.stream().toArray(String[]::new)
         );
     }
 }

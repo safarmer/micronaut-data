@@ -15,27 +15,53 @@
  */
 package io.micronaut.data.tck.tests
 
+import io.micronaut.context.ApplicationContext
 import io.micronaut.data.model.Pageable
 import io.micronaut.data.tck.entities.Person
 import io.micronaut.data.tck.entities.PersonDto
+import io.micronaut.data.tck.entities.Student
 import io.micronaut.data.tck.repositories.PersonReactiveRepository
+import io.micronaut.data.tck.repositories.StudentReactiveRepository
+import spock.lang.AutoCleanup
+import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Stepwise
+import spock.lang.Timeout
 
+import java.util.concurrent.TimeUnit
+
+@Timeout(value = 20, unit = TimeUnit.SECONDS)
 @Stepwise
 abstract class AbstractReactiveRepositorySpec extends Specification {
 
+    @AutoCleanup
+    @Shared
+    ApplicationContext context = ApplicationContext.run(properties)
+
     abstract PersonReactiveRepository getPersonRepository()
+    abstract StudentReactiveRepository getStudentRepository()
 
-    abstract void init()
+    void init() {
+    }
 
-    def setupSpec() {
+    def setup() {
         init()
         personRepository.deleteAll().blockingGet()
+        studentRepository.deleteAll().blockingGet()
         personRepository.saveAll([
                 new Person(name: "Jeff"),
                 new Person(name: "James")
         ]).toList().blockingGet()
+    }
+
+    def createFrankAndBob(){
+        personRepository.save("Frank", 0).blockingGet()
+        personRepository.save("Bob", 0).blockingGet()
+    }
+
+    def cleanup() {
+        personRepository.deleteAll().blockingGet()
+        studentRepository.deleteAll().blockingGet()
     }
 
     void "test no value"() {
@@ -71,15 +97,95 @@ abstract class AbstractReactiveRepositorySpec extends Specification {
         then:"all are saved"
         people.every { it.id != null }
         people.every { personRepository.findById(it.id).blockingGet() != null }
-        personRepository.findAll().toList().blockingGet().size() == 5
-        personRepository.count().blockingGet() == 5
-        personRepository.count("Fred").blockingGet() == 1
+        personRepository.findAll().toList().blockingGet().size() == 4
+        personRepository.count().blockingGet() == 4
+        personRepository.count("Jeff").blockingGet() == 1
         personRepository.list(Pageable.from(1)).toList().blockingGet().isEmpty()
         personRepository.list(Pageable.from(0, 1)).toList().blockingGet().size() == 1
     }
 
+    void "test update many"() {
+        when:
+        def people = personRepository.findAll().blockingIterable().toList()
+        people.forEach() { it.name = it.name + " updated" }
+        def recordsUpdated = personRepository.updateAll(people).toList().blockingGet().size()
+        people = personRepository.findAll().blockingIterable().toList()
+
+        then:
+        people.size() == 2
+        recordsUpdated == 2
+        people.get(0).name.endsWith(" updated")
+        people.get(1).name.endsWith(" updated")
+
+        when:
+        people = personRepository.findAll().blockingIterable().toList()
+        people.forEach() { it.name = it.name + " X" }
+        def peopleUpdated = personRepository.updatePeople(people).blockingIterable().toList()
+        people = personRepository.findAll().blockingIterable().toList()
+
+        then:
+        peopleUpdated.size() == 2
+        people.get(0).name.endsWith(" X")
+        people.get(1).name.endsWith(" X")
+        peopleUpdated.get(0).name.endsWith(" X")
+        peopleUpdated.get(1).name.endsWith(" X")
+    }
+
+    void "test custom insert"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        def saved = personRepository.saveCustom([new Person(name: "Abc", age: 12), new Person(name: "Xyz", age: 22)]).blockingGet()
+
+        when:
+        def people = personRepository.findAll().blockingIterable().toList()
+
+        then:
+        saved == 2
+        people.size() == 2
+        people.get(0).name == "Abc"
+        people.get(1).name == "Xyz"
+        people.get(0).age == 12
+        people.get(1).age == 22
+    }
+
+    void "test custom single insert"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        def saved = personRepository.saveCustomSingle(new Person(name: "Abc", age: 12)).blockingGet()
+
+        when:
+        def people = personRepository.findAll().toList().blockingGet()
+
+        then:
+        saved == 1
+        people.size() == 1
+        people.get(0).name == "Abc"
+    }
+
+    void "test custom update"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        def saved = personRepository.saveCustom([
+                new Person(name: "Dennis", age: 12),
+                new Person(name: "Jeff", age: 22),
+                new Person(name: "James", age: 12),
+                new Person(name: "Dennis", age: 22)]
+        ).blockingGet()
+
+        when:
+        def updated = personRepository.updateNamesCustom("Denis", "Dennis").blockingGet()
+        def people = personRepository.findAll().blockingIterable().toList()
+
+        then:
+        saved == 4
+        updated == 2
+        people.count { it.name == "Dennis"} == 0
+        people.count { it.name == "Denis"} == 2
+    }
+
     void "test delete by id"() {
         when:"an entity is retrieved"
+        createFrankAndBob()
         def person = personRepository.findByName("Frank").blockingGet()
 
         then:"the person is not null"
@@ -92,14 +198,17 @@ abstract class AbstractReactiveRepositorySpec extends Specification {
 
         then:"They are really deleted"
         !personRepository.findById(person.id).blockingGet()
-        personRepository.count().blockingGet() == 4
+        personRepository.count().blockingGet() == 3
     }
 
     void "test delete by multiple ids"() {
         when:"A search for some people"
+        createFrankAndBob()
+        def allPeople = personRepository.findAll().toList().blockingGet()
         def people = personRepository.findByNameLike("J%").toList().blockingGet()
 
         then:
+        allPeople.size() == 4
         people.size() == 2
 
         when:"the people are deleted"
@@ -112,31 +221,36 @@ abstract class AbstractReactiveRepositorySpec extends Specification {
 
     void "test delete one"() {
         when:"A specific person is found and deleted"
+        createFrankAndBob()
+        def allPeople = personRepository.findAll().toList().blockingGet()
         def bob = personRepository.findByName("Bob").blockingGet()
 
         then:"The person is present"
         bob != null
+        allPeople.size() == 4
 
         when:"The person is deleted"
         personRepository.deleteById(bob.id).blockingGet()
 
         then:"They are deleted"
         !personRepository.findById(bob.id).blockingGet()
-        personRepository.count().blockingGet() == 1
+        personRepository.count().blockingGet() == 3
     }
 
     void "test update one"() {
         when:"A person is retrieved"
-        def fred = personRepository.findByName("Fred").blockingGet()
+        createFrankAndBob()
+        def frank = personRepository.findByName("Frank").blockingGet()
 
         then:"The person is present"
-        fred != null
+        frank != null
 
         when:"The person is updated"
-        personRepository.updatePerson(fred.id, "Jack").blockingGet()
+        def updated =personRepository.updatePerson(frank.id, "Jack").blockingGet()
 
         then:"the person is updated"
-        personRepository.findByName("Fred").blockingGet() == null
+        updated == 1
+        personRepository.findByName("Frank").blockingGet() == null
         personRepository.findByName("Jack").blockingGet() != null
 
         when:
@@ -155,20 +269,156 @@ abstract class AbstractReactiveRepositorySpec extends Specification {
         personRepository.save("Greg", 30).blockingGet()
         personRepository.save("Groot", 300).blockingGet()
 
-        then:"The count is 3"
-        personRepository.count().blockingGet() == 3
+        then:"The count is 4"
+        personRepository.count().blockingGet() == 4
 
         when:"batch delete occurs"
         def deleted = personRepository.deleteByNameLike("G%").blockingGet()
 
-        then:"The count is back to 1 and it entries were deleted"
+        then:"The count is back to 2 and it entries were deleted"
         deleted == 2
-        personRepository.count().blockingGet() == 1
+        personRepository.count().blockingGet() == 2
 
         when:"everything is deleted"
         personRepository.deleteAll().blockingGet()
 
         then:"data is gone"
         personRepository.count().blockingGet() == 0
+    }
+
+    boolean skipOptimisticLockingTest() {
+        return false
+    }
+
+    def "test optimistic locking"() {
+        if (skipOptimisticLockingTest()) {
+            return
+        }
+        given:
+            def student = new Student("Denis")
+        when:
+            studentRepository.save(student).blockingGet()
+        then:
+            student.version == 0
+        when:
+            student.setVersion(5)
+            student.setName("Xyz")
+            studentRepository.update(student).blockingGet()
+        then:
+            def e = thrown(Exception)
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            e = studentRepository.updateByIdAndVersion(student.getId(), student.getVersion(), student.getName()).blockingGet()
+        then:
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            e = studentRepository.delete(student).blockingGet()
+        then:
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            e = studentRepository.deleteByIdAndVersionAndName(student.getId(), student.getVersion(), student.getName()).blockingGet()
+        then:
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            e = studentRepository.deleteByIdAndVersion(student.getId(), student.getVersion()).blockingGet()
+        then:
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            e = studentRepository.deleteAll([student]).blockingGet()
+        then:
+            e.message.contains "Execute update returned unexpected row count. Expected: 1 got: 0"
+        when:
+            student = studentRepository.findById(student.getId()).blockingGet()
+        then:
+            student.name == "Denis"
+            student.version == 0
+        when:
+            student.setName("Abc")
+            studentRepository.update(student).blockingGet()
+            def student2 = studentRepository.findById(student.getId()).blockingGet()
+        then:
+            student.version == 1
+            student2.name == "Abc"
+            student2.version == 1
+        when:
+            studentRepository.updateByIdAndVersion(student2.getId(), student2.getVersion(), "Joe").blockingGet()
+            def student3 = studentRepository.findById(student2.getId()).blockingGet()
+        then:
+            student3.name == "Joe"
+            student3.version == 2
+        when:
+            studentRepository.updateById(student2.getId(), "Joe2").blockingGet()
+            def student4 = studentRepository.findById(student2.getId()).blockingGet()
+        then:
+            student4.name == "Joe2"
+            student4.version == 2
+        when:
+            studentRepository.deleteByIdAndVersionAndName(student4.getId(), student4.getVersion(), student4.getName()).blockingGet()
+            def student5 = studentRepository.findById(student2.getId())
+        then:
+            student5.isEmpty().blockingGet()
+    }
+
+    void "test custom delete"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList().blockingGet()
+        people.findAll {it.name == "Dennis"}.forEach{ it.name = "DoNotDelete"}
+        def deleted = personRepository.deleteCustom(people).blockingGet()
+        people = personRepository.findAll().toList().blockingGet()
+
+        then:
+        deleted == 2
+        people.size() == 2
+        people.count {it.name == "Dennis"}
+    }
+
+    void "test custom delete single"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList().blockingGet()
+        def jeff = people.find {it.name == "Jeff"}
+        def deleted = personRepository.deleteCustomSingle(jeff).blockingGet()
+        people = personRepository.findAll().toList().blockingGet()
+
+        then:
+        deleted == 1
+        people.size() == 3
+
+        when:
+        def james = people.find {it.name == "James"}
+        james.name = "DoNotDelete"
+        deleted = personRepository.deleteCustomSingle(james).blockingGet()
+        people = personRepository.findAll().toList().blockingGet()
+
+        then:
+        deleted == 0
+        people.size() == 3
+    }
+
+    void "test custom delete single no entity"() {
+        given:
+        personRepository.deleteAll().blockingGet()
+        savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+        def people = personRepository.findAll().toList().blockingGet()
+        def jeff = people.find {it.name == "Jeff"}
+        def deleted = personRepository.deleteCustomSingleNoEntity(jeff.getName()).blockingGet()
+        people = personRepository.findAll().toList().blockingGet()
+
+        then:
+        deleted == 1
+        people.size() == 3
+    }
+
+    protected void savePersons(List<String> names) {
+        personRepository.saveAll(names.collect { new Person(name: it) }).toList().blockingGet()
     }
 }

@@ -15,6 +15,7 @@
  */
 package io.micronaut.data.processor.visitors;
 
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.context.annotation.Property;
 import io.micronaut.core.annotation.AnnotationMetadata;
 import io.micronaut.core.annotation.AnnotationValue;
@@ -52,7 +53,7 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
      */
     public static final int POSITION = 100;
 
-    private Map<String, SourcePersistentEntity> entityMap = new HashMap<>(50);
+    private final Map<String, SourcePersistentEntity> entityMap = new HashMap<>(50);
     private final Function<ClassElement, SourcePersistentEntity> entityResolver = new Function<ClassElement, SourcePersistentEntity>() {
         @Override
         public SourcePersistentEntity apply(ClassElement classElement) {
@@ -81,6 +82,12 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
         return POSITION;
     }
 
+    @NonNull
+    @Override
+    public VisitorKind getVisitorKind() {
+        return VisitorKind.ISOLATING;
+    }
+
     @Override
     public void visitClass(ClassElement element, VisitorContext context) {
         NamingStrategy namingStrategy = resolveNamingStrategy(element);
@@ -96,11 +103,21 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
         Map<String, DataType> dataTypes = getConfiguredDataTypes(element);
         List<SourcePersistentProperty> properties = entity.getPersistentProperties();
         for (PersistentProperty property : properties) {
-            computeMappingDefaults(namingStrategy, property, dataTypes);
+            computeMappingDefaults(namingStrategy, property, dataTypes, context);
         }
         SourcePersistentProperty identity = entity.getIdentity();
         if (identity != null) {
-            computeMappingDefaults(namingStrategy, identity, dataTypes);
+            computeMappingDefaults(namingStrategy, identity, dataTypes, context);
+        }
+        SourcePersistentProperty[] compositeIdentities = entity.getCompositeIdentity();
+        if (compositeIdentities != null) {
+            for (SourcePersistentProperty compositeIdentity : compositeIdentities) {
+                computeMappingDefaults(namingStrategy, compositeIdentity, dataTypes, context);
+            }
+        }
+        SourcePersistentProperty version = entity.getVersion();
+        if (version != null) {
+            computeMappingDefaults(namingStrategy, version, dataTypes, context);
         }
     }
 
@@ -132,7 +149,8 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
     private void computeMappingDefaults(
             NamingStrategy namingStrategy,
             PersistentProperty property,
-            Map<String, DataType> dataTypes) {
+            Map<String, DataType> dataTypes,
+            VisitorContext context) {
         AnnotationMetadata annotationMetadata = property.getAnnotationMetadata();
         SourcePersistentProperty spp = (SourcePersistentProperty) property;
         PropertyElement propertyElement = spp.getPropertyElement();
@@ -140,8 +158,15 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
         DataType dataType = annotationMetadata.getValue(TypeDef.class, "type", DataType.class)
                 .orElse(null);
 
+        if (dataType == null && spp.getType().isEnum()) {
+            if (spp.getOwner().getAnnotationMetadata().hasAnnotation("javax.persistence.Entity")) {
+                // JPA enums have default ORDINAL mapping for enums
+                dataType = DataType.INTEGER;
+            }
+        }
+
         if (dataType == null) {
-            ClassElement type = propertyElement.getType();
+            ClassElement type = propertyElement.getGenericType();
             dataType = TypeUtils.resolveDataType(type, dataTypes);
         }
 
@@ -152,6 +177,11 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
             );
         } else if (isRelation) {
             Relation.Kind kind = propertyElement.enumValue(Relation.class, Relation.Kind.class).orElse(Relation.Kind.MANY_TO_ONE);
+            if (kind == Relation.Kind.EMBEDDED || kind == Relation.Kind.MANY_TO_ONE) {
+                if (propertyElement.stringValue(Relation.class, "mappedBy").isPresent()) {
+                    context.fail("Relation " + kind + " doesn't support 'mappedBy'.", propertyElement);
+                }
+            }
             if (kind == Relation.Kind.EMBEDDED) {
                 // handled embedded
                 SourcePersistentEntity embeddedEntity = entityResolver.apply(propertyElement.getType());
@@ -184,8 +214,11 @@ public class MappedEntityVisitor implements TypeElementVisitor<MappedEntity, Obj
         if (mappedEntity && !mapping.isPresent()) {
             propertyElement.annotate(MappedProperty.class, builder -> builder.value(namingStrategy.mappedName(spp)));
         }
-        DataType finalDataType = dataType;
-        propertyElement.annotate(MappedProperty.class, builder -> builder.member("type", finalDataType));
+
+        if (dataType != DataType.OBJECT) {
+            DataType finalDataType = dataType;
+            propertyElement.annotate(MappedProperty.class, builder -> builder.member("type", finalDataType));
+        }
     }
 
     private NamingStrategy resolveNamingStrategy(ClassElement element) {

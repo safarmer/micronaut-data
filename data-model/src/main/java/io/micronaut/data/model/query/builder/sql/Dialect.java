@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.model.query.builder.sql;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.data.model.DataType;
 
 /**
@@ -32,7 +32,7 @@ public enum Dialect {
     /**
      * MySQL 5.5 or above.
      */
-    MYSQL(false, true, false),
+    MYSQL(true, true, false),
     /**
      * Postgres 9.5 or later.
      */

@@ -19,8 +19,10 @@ import io.micronaut.data.model.PersistentEntity;
 import io.micronaut.data.model.query.DefaultQuery;
 import io.micronaut.data.model.query.QueryModel;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import java.util.Map;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.data.model.query.builder.QueryParameterBinding;
+
+import java.util.List;
 
 /**
  * Represents a raw query. Specified by the user.
@@ -30,22 +32,32 @@ import java.util.Map;
  */
 public class RawQuery extends DefaultQuery implements QueryModel {
 
-    private final Map<String, String> parameterBinding;
+    private final List<QueryParameterBinding> parameterBinding;
+    private final boolean encodeEntityParameters;
 
     /**
      * Represents a raw query provided by the user.
      * @param entity The entity
      * @param parameterBinding The parameter binding.
+     * @param encodeEntityParameters The encodeEntityParameters.
      */
-    protected RawQuery(@NonNull PersistentEntity entity, @NonNull Map<String, String> parameterBinding) {
+    protected RawQuery(@NonNull PersistentEntity entity, @NonNull List<QueryParameterBinding> parameterBinding, boolean encodeEntityParameters) {
         super(entity);
         this.parameterBinding = parameterBinding;
+        this.encodeEntityParameters = encodeEntityParameters;
     }
 
     /**
      * @return The parameter binding to use for the raw query.
      */
-    public Map<String, String> getParameterBinding() {
+    public List<QueryParameterBinding> getParameterBinding() {
         return this.parameterBinding;
+    }
+
+    /**
+     * @return should encode entity parameters
+     */
+    public boolean isEncodeEntityParameters() {
+        return encodeEntityParameters;
     }
 }

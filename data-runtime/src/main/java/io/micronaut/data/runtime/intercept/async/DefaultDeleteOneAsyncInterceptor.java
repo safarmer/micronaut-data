@@ -15,14 +15,14 @@
  */
 package io.micronaut.data.runtime.intercept.async;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
+import io.micronaut.core.type.Argument;
 import io.micronaut.data.intercept.RepositoryMethodKey;
-import io.micronaut.data.model.runtime.BatchOperation;
-import io.micronaut.data.operations.RepositoryOperations;
 import io.micronaut.data.intercept.async.DeleteOneAsyncInterceptor;
+import io.micronaut.data.model.runtime.DeleteOperation;
+import io.micronaut.data.operations.RepositoryOperations;
 
-import java.util.Collections;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -32,8 +32,8 @@ import java.util.concurrent.CompletionStage;
  * @since 1.0.0
  */
 @SuppressWarnings("unused")
-public class DefaultDeleteOneAsyncInterceptor<T> extends AbstractAsyncInterceptor<T, Number>
-        implements DeleteOneAsyncInterceptor<T> {
+public class DefaultDeleteOneAsyncInterceptor<T> extends AbstractAsyncInterceptor<T, Object>
+        implements DeleteOneAsyncInterceptor<T, Object> {
     /**
      * Default constructor.
      *
@@ -44,19 +44,16 @@ public class DefaultDeleteOneAsyncInterceptor<T> extends AbstractAsyncIntercepto
     }
 
     @Override
-    public CompletionStage<Number> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Number>> context) {
-        Object[] parameterValues = context.getParameterValues();
-        if (parameterValues.length == 1) {
-            Object o = parameterValues[0];
-            if (o != null) {
-                BatchOperation<Object> batchOperation = getBatchOperation(context, Collections.singletonList(o));
-                return asyncDatastoreOperations.deleteAll(batchOperation)
-                        .thenApply(n -> convertNumberArgumentIfNecessary(n, context.getReturnType().asArgument()));
-            } else {
-                throw new IllegalArgumentException("Entity to delete cannot be null");
-            }
+    public CompletionStage<Object> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Object>> context) {
+        Argument<CompletionStage<Object>> arg = context.getReturnType().asArgument();
+        Object entity = getEntityParameter(context, Object.class);
+        if (entity != null) {
+            final DeleteOperation<Object> deleteOperation = getDeleteOperation(context, entity);
+            return asyncDatastoreOperations.delete(deleteOperation)
+                    .thenApply(number -> convertNumberArgumentIfNecessary(number, arg));
         } else {
-            throw new IllegalStateException("Expected exactly one argument");
+            throw new IllegalArgumentException("Entity to delete cannot be null");
         }
     }
 }
+

@@ -15,8 +15,8 @@
  */
 package io.micronaut.data.model.runtime;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.naming.Named;
 import io.micronaut.core.reflect.ReflectionUtils;
 import io.micronaut.core.type.Argument;
@@ -197,8 +197,36 @@ public interface StoredQuery<E, R> extends Named, StoredDataOperation<R> {
      *
      * @return The last updated property
      */
+    @Deprecated
     default @Nullable String getLastUpdatedProperty() {
         return null;
+    }
+
+    /**
+     * The mapping between query parameters and auto populated properties that the parameter represents.
+     *
+     * @return The auto populated properties.
+     */
+    default String[] getIndexedParameterAutoPopulatedPropertyPaths() {
+        return StringUtils.EMPTY_STRING_ARRAY;
+    }
+
+    /**
+     * The mapping between query parameters and auto populated previous properties that the parameter represents.
+     *
+     * @return The auto populated properties.
+     */
+    default String[] getIndexedParameterAutoPopulatedPreviousPropertyPaths() {
+        return StringUtils.EMPTY_STRING_ARRAY;
+    }
+
+    /**
+     * The mapping between query parameters and auto populated previous properties that the parameter represents.
+     *
+     * @return The auto populated properties.
+     */
+    default int[] getIndexedParameterAutoPopulatedPreviousPropertyIndexes() {
+        return new int[0];
     }
 
     /**
@@ -218,4 +246,13 @@ public interface StoredQuery<E, R> extends Named, StoredDataOperation<R> {
      * @return Whether a result consumer is present
      */
     boolean hasResultConsumer();
+
+    /**
+     * Is with an optimistic lock.
+     *
+     * @return the result
+     */
+    default boolean isOptimisticLock() {
+        return false;
+    }
 }

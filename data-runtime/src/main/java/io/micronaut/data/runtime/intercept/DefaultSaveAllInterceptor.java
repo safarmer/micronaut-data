@@ -15,11 +15,10 @@
  */
 package io.micronaut.data.runtime.intercept;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
 import io.micronaut.core.convert.ConversionService;
 import io.micronaut.core.type.ReturnType;
-import io.micronaut.core.util.ArrayUtils;
 import io.micronaut.data.intercept.RepositoryMethodKey;
 import io.micronaut.data.intercept.SaveAllInterceptor;
 import io.micronaut.data.operations.RepositoryOperations;
@@ -31,7 +30,7 @@ import io.micronaut.data.operations.RepositoryOperations;
  * @author graemerocher
  * @since 1.0.0
  */
-public class DefaultSaveAllInterceptor<T, R> extends AbstractQueryInterceptor<T, Iterable<R>>
+public class DefaultSaveAllInterceptor<T, R> extends AbstractQueryInterceptor<T, R>
         implements SaveAllInterceptor<T, R> {
 
     /**
@@ -43,20 +42,18 @@ public class DefaultSaveAllInterceptor<T, R> extends AbstractQueryInterceptor<T,
     }
 
     @Override
-    public Iterable<R> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, Iterable<R>> context) {
-        Object[] parameterValues = context.getParameterValues();
-        if (ArrayUtils.isNotEmpty(parameterValues) && parameterValues[0] instanceof Iterable) {
-            //noinspection unchecked
-            Iterable<R> iterable = (Iterable<R>) parameterValues[0];
-            Iterable<R> rs = operations.persistAll(getBatchOperation(context, iterable));
-            ReturnType<Iterable<R>> rt = context.getReturnType();
-            if (!rt.getType().isInstance(rs)) {
-                return ConversionService.SHARED.convert(rs, rt.asArgument())
-                            .orElseThrow(() -> new IllegalStateException("Unsupported iterable return type: " + rs.getClass()));
-            }
-            return rs;
-        } else {
-            throw new IllegalArgumentException("First argument should be an iterable");
+    public R intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, R> context) {
+        Iterable<Object> iterable = getEntitiesParameter(context, Object.class);
+        Iterable<Object> rs = operations.persistAll(getInsertBatchOperation(context, iterable));
+        ReturnType<R> rt = context.getReturnType();
+        if (rt.isVoid()) {
+            return null;
         }
+        if (isNumber(rt.getType())) {
+            return ConversionService.SHARED.convert(count(rs), rt.asArgument())
+                    .orElseThrow(() -> new IllegalStateException("Unsupported return type: " + rt.getType()));
+        }
+        return ConversionService.SHARED.convert(rs, rt.asArgument())
+                .orElseThrow(() -> new IllegalStateException("Unsupported iterable return type: " + rt.getType()));
     }
 }

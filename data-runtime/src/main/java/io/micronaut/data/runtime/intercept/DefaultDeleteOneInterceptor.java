@@ -15,24 +15,18 @@
  */
 package io.micronaut.data.runtime.intercept;
 
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
-import io.micronaut.core.beans.BeanProperty;
 import io.micronaut.core.convert.ConversionService;
-import io.micronaut.data.annotation.Query;
 import io.micronaut.data.intercept.DeleteOneInterceptor;
 import io.micronaut.data.intercept.RepositoryMethodKey;
-import io.micronaut.data.model.Embedded;
-import io.micronaut.data.model.runtime.BatchOperation;
-import io.micronaut.data.model.runtime.PreparedQuery;
-import io.micronaut.data.model.runtime.RuntimePersistentEntity;
-import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.operations.RepositoryOperations;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import java.util.Collections;
+import java.util.Optional;
 
 /**
  * The default implementation of {@link DeleteOneInterceptor}.
+ *
  * @param <T> The declaring type
  * @author graemerocher
  * @since 1.0.0
@@ -41,6 +35,7 @@ public class DefaultDeleteOneInterceptor<T> extends AbstractQueryInterceptor<T, 
 
     /**
      * Default constructor.
+     *
      * @param datastore The operations
      */
     protected DefaultDeleteOneInterceptor(@NonNull RepositoryOperations datastore) {
@@ -49,60 +44,27 @@ public class DefaultDeleteOneInterceptor<T> extends AbstractQueryInterceptor<T, 
 
     @Override
     public Object intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, Object> context) {
-        Object[] parameterValues = context.getParameterValues();
-        if (parameterValues.length == 1) {
-            Object o = parameterValues[0];
-            if (context.hasAnnotation(Query.class)) {
-                PreparedQuery<?, Number> preparedQuery = (PreparedQuery<?, Number>) prepareQuery(methodKey, context);
-                final Class<?> rootEntity = preparedQuery.getRootEntity();
-                if (rootEntity.isInstance(o)) {
-                    final RuntimePersistentEntity<?> entity = operations.getEntity(rootEntity);
-                    final RuntimePersistentProperty<?> identity = entity.getIdentity();
-                    if (identity != null) {
-                        if (identity instanceof Embedded) {
-                            final BeanProperty idProp = identity.getProperty();
-                            final Object idValue = idProp.get(o);
-                            if (idValue == null) {
-                                throw new IllegalStateException("Cannot delete an entity with null ID: " + o);
-                            }
-                            preparedQuery.getParameterArray()[0] = idValue;
-                        }
-                        final Number result = operations.executeDelete(preparedQuery).orElse(0);
-                        final Class<Object> returnType = context.getReturnType().getType();
-                        if (returnType.equals(rootEntity)) {
-                            if (result.longValue() > 0) {
-                                return o;
-                            } else {
-                                return null;
-                            }
-                        } else if (Number.class.isAssignableFrom(returnType)) {
-                            return ConversionService.SHARED.convertRequired(result, returnType);
-                        } else  {
-                            return result;
-                        }
-                    } else {
-                        throw new IllegalStateException("Cannot delete an entity which defines no ID: " + rootEntity.getName());
-                    }
+        Class<Object> returnType = context.getReturnType().getType();
+        Optional<Object> deleteEntity = findEntityParameter(context, Object.class);
+        if (deleteEntity.isPresent()) {
+            Object entity = deleteEntity.get();
+            Class<?> rootEntity = getRequiredRootEntity(context);
+            if (!rootEntity.isInstance(entity)) {
+                throw new IllegalArgumentException("Entity argument must be an instance of " + rootEntity.getName());
+            }
+            Number deleted = operations.delete(getDeleteOperation(context, entity));
+            if (isNumber(returnType)) {
+                return ConversionService.SHARED.convertRequired(deleted, returnType);
+            } else if (returnType.equals(rootEntity)) {
+                if (deleted.intValue() > 0) {
+                    return entity;
                 } else {
-                    if (o == null) {
-                        throw new IllegalArgumentException("Entity to delete cannot be null");
-                    } else {
-                        throw new IllegalArgumentException("Entity argument must be an instance of " + rootEntity.getName());
-                    }
-                }
-            } else {
-
-                BatchOperation<Object> batchOperation = getBatchOperation(context, Collections.singletonList(o));
-                if (o != null) {
-                    operations.deleteAll(batchOperation);
-                } else {
-                    throw new IllegalArgumentException("Entity to delete cannot be null");
+                    return null;
                 }
             }
-        } else {
-            throw new IllegalStateException("Expected exactly one argument");
+            return null;
         }
-
-        return null;
+        throw new IllegalStateException("Argument not found");
     }
+
 }

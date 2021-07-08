@@ -15,8 +15,10 @@
  */
 package io.micronaut.data.runtime.intercept.async;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.aop.MethodInvocationContext;
+import io.micronaut.core.convert.ConversionService;
+import io.micronaut.core.type.Argument;
 import io.micronaut.data.intercept.RepositoryMethodKey;
 import io.micronaut.data.operations.RepositoryOperations;
 import io.micronaut.data.intercept.async.SaveEntityAsyncInterceptor;
@@ -42,6 +44,12 @@ public class DefaultSaveEntityInterceptor<T> extends AbstractAsyncInterceptor<T,
 
     @Override
     public CompletionStage<Object> intercept(RepositoryMethodKey methodKey, MethodInvocationContext<T, CompletionStage<Object>> context) {
-        return asyncDatastoreOperations.persist(getInsertOperation(context));
+        Object entity = getEntityParameter(context, Object.class);
+        CompletionStage<Object> cs = asyncDatastoreOperations.persist(getInsertOperation(context, entity));
+        Argument<?> csValueArgument = context.getReturnType().getFirstTypeVariable().orElse(Argument.OBJECT_ARGUMENT);
+        if (isNumber(csValueArgument.getType())) {
+            return cs.thenApply(it -> ConversionService.SHARED.convertRequired(it == null ? 0 : 1, csValueArgument));
+        }
+        return cs;
     }
 }

@@ -15,8 +15,8 @@
  */
 package io.micronaut.data.processor.visitors.finders;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.reflect.ClassUtils;
 import io.micronaut.core.reflect.ReflectionUtils;
@@ -26,6 +26,7 @@ import io.micronaut.data.model.DataType;
 import io.micronaut.data.model.Slice;
 import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.MethodElement;
+import io.micronaut.inject.ast.ParameterElement;
 import org.reactivestreams.Publisher;
 
 import java.math.BigDecimal;
@@ -75,6 +76,18 @@ public class TypeUtils {
     }
 
     /**
+     * Does the given type have an {@link MappedEntity}.
+     * @param type The type
+     * @return True if it does
+     */
+    public static boolean isEntity(@Nullable ClassElement type) {
+        if (type == null) {
+            return false;
+        }
+        return type.hasAnnotation(MappedEntity.class);
+    }
+
+    /**
      * Does the given type have a first argument annotated with {@link MappedEntity}.
      * @param type The type
      * @return True if it does
@@ -83,7 +96,7 @@ public class TypeUtils {
         if (type == null) {
             return false;
         }
-        return type.getFirstTypeArgument().map(t -> t.hasAnnotation(MappedEntity.class)).orElse(false);
+        return type.getFirstTypeArgument().map(TypeUtils::isEntity).orElse(false);
     }
 
     /**
@@ -196,7 +209,7 @@ public class TypeUtils {
      * @return True if is void
      */
     public static boolean isVoid(@Nullable ClassElement type) {
-        return type != null && type.getName().equals("void");
+        return type != null && (type.isAssignable(Void.class) || type.isAssignable(void.class));
     }
 
     /**
@@ -241,6 +254,19 @@ public class TypeUtils {
      */
     public static boolean isObjectClass(ClassElement type) {
         return type != null && type.getName().equals(Object.class.getName());
+    }
+
+    /**
+     * Compute the data type for the given parameter.
+     * @param parameter The parameter
+     * @return The data type
+     */
+    public static Optional<DataType> resolveDataType(@NonNull ParameterElement parameter) {
+        ClassElement genericType = parameter.getGenericType();
+        if (TypeUtils.isEntityContainerType(genericType) || genericType.hasStereotype(MappedEntity.class)) {
+            return Optional.of(DataType.ENTITY);
+        }
+        return parameter.enumValue(TypeDef.class, "type", DataType.class);
     }
 
     /**

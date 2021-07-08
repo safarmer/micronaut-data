@@ -29,6 +29,7 @@ import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.model.PersistentEntity;
 import io.micronaut.data.model.query.builder.sql.Dialect;
 import io.micronaut.data.model.query.builder.sql.SqlQueryBuilder;
+import io.micronaut.data.model.runtime.RuntimeEntityRegistry;
 import io.micronaut.data.runtime.config.DataSettings;
 import io.micronaut.data.runtime.config.SchemaGenerate;
 import io.micronaut.inject.qualifiers.Qualifiers;
@@ -68,6 +69,7 @@ public class SchemaGenerator {
      */
     @PostConstruct
     public void createSchema(BeanLocator beanLocator) {
+        RuntimeEntityRegistry runtimeEntityRegistry = beanLocator.getBean(RuntimeEntityRegistry.class);
         for (DataJdbcConfiguration configuration : configurations) {
             Dialect dialect = configuration.getDialect();
             SchemaGenerate schemaGenerate = configuration.getSchemaGenerate();
@@ -85,7 +87,8 @@ public class SchemaGenerator {
                         // filter out inner / internal / abstract(MappedSuperClass) classes
                         .filter(i -> !i.getBeanType().getName().contains("$"))
                         .filter(i -> !java.lang.reflect.Modifier.isAbstract(i.getBeanType().getModifiers()))
-                        .map(PersistentEntity ::of).toArray(PersistentEntity[]::new);
+                        .map(beanIntrospection -> runtimeEntityRegistry.getEntity(beanIntrospection.getBeanType()))
+                        .toArray(PersistentEntity[]::new);
                 if (ArrayUtils.isNotEmpty(entities)) {
                     DataSource dataSource = DelegatingDataSource.unwrapDataSource(beanLocator.getBean(DataSource.class, Qualifiers.byName(name)));
                     try {
@@ -103,7 +106,7 @@ public class SchemaGenerator {
                                             ps.executeUpdate();
                                         } catch (SQLException e) {
                                             if (DataSettings.QUERY_LOG.isTraceEnabled()) {
-                                                DataSettings.QUERY_LOG.trace("Drop Failed: " + e.getMessage());
+                                                DataSettings.QUERY_LOG.trace("Drop Unsuccessful: " + e.getMessage());
                                             }
                                         }
                                     case CREATE:
@@ -132,7 +135,7 @@ public class SchemaGenerator {
                                                 }
                                             } catch (SQLException e) {
                                                 if (DataSettings.QUERY_LOG.isTraceEnabled()) {
-                                                    DataSettings.QUERY_LOG.trace("Drop Failed: " + e.getMessage());
+                                                    DataSettings.QUERY_LOG.trace("Drop Unsuccessful: " + e.getMessage());
                                                 }
                                             }
                                         }
@@ -149,7 +152,7 @@ public class SchemaGenerator {
                                                     ps.executeUpdate();
                                                 } catch (SQLException e) {
                                                     if (DataSettings.QUERY_LOG.isWarnEnabled()) {
-                                                        DataSettings.QUERY_LOG.warn("CREATE Statement Failed: " + e.getMessage());
+                                                        DataSettings.QUERY_LOG.warn("CREATE Statement Unsuccessful: " + e.getMessage());
                                                     }
                                                 }
                                             }

@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.runtime.operations;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.data.model.runtime.*;
 import io.micronaut.data.operations.RepositoryOperations;
@@ -155,7 +155,23 @@ public class ExecutorAsyncOperations implements AsyncRepositoryOperations {
 
     @NonNull
     @Override
-    public <T> CompletableFuture<Iterable<T>> persistAll(@NonNull BatchOperation<T> operation) {
+    public <T> CompletableFuture<Iterable<T>> updateAll(@NonNull UpdateBatchOperation<T> operation) {
+        return CompletableFuture.supplyAsync(() ->
+                datastore.updateAll(operation), executor
+        );
+    }
+
+    @NonNull
+    @Override
+    public <T> CompletableFuture<Number> delete(@NonNull DeleteOperation<T> operation) {
+        return CompletableFuture.supplyAsync(() ->
+                datastore.delete(operation), executor
+        );
+    }
+
+    @NonNull
+    @Override
+    public <T> CompletableFuture<Iterable<T>> persistAll(@NonNull InsertBatchOperation<T> operation) {
         return CompletableFuture.supplyAsync(() -> datastore.persistAll(operation), executor);
     }
 
@@ -167,7 +183,7 @@ public class ExecutorAsyncOperations implements AsyncRepositoryOperations {
 
     @NonNull
     @Override
-    public <T> CompletableFuture<Number> deleteAll(@NonNull BatchOperation<T> operation) {
+    public <T> CompletableFuture<Number> deleteAll(@NonNull DeleteBatchOperation<T> operation) {
         return CompletableFuture.supplyAsync(() ->
                 datastore.deleteAll(operation).orElse(0),
                 executor

@@ -42,6 +42,27 @@ interface MyInterface extends CrudRepository<Author, Long> {
         repository != null
     }
 
+    void "test POSTGRES quoted syntax"() {
+        given:
+            def repository = buildRepository('test.MyInterface2', """
+import io.micronaut.data.jdbc.annotation.JdbcRepository;
+import io.micronaut.data.model.query.builder.sql.Dialect;
+import io.micronaut.data.tck.entities.CustomBook;
+
+@JdbcRepository(dialect= Dialect.POSTGRES)
+@io.micronaut.context.annotation.Executable
+interface MyInterface2 extends CrudRepository<CustomBook, Long> {
+}
+"""
+            )
+
+        when:
+            String query = repository.getRequiredMethod("findById", Long).stringValue(Query).get()
+
+        then:
+            query == 'SELECT custom_book_."id",custom_book_."title" FROM "CustomBooK" custom_book_ WHERE (custom_book_."id" = ?)'
+    }
+
     void "test to-one join on repository type that inherits from CrudRepository"() {
         given:
         def repository = buildRepository('test.MyInterface', """
@@ -78,13 +99,13 @@ import java.util.UUID;
 
 @JdbcRepository(dialect= Dialect.MYSQL)
 @io.micronaut.context.annotation.Executable
-interface MealRepository extends CrudRepository<Meal, UUID> {
+interface MealRepository extends CrudRepository<Meal, Long> {
     @Join("foods")
-    Meal searchById(UUID uuid);
+    Meal searchById(Long id);
 }
 """)
 
-        def query = repository.getRequiredMethod("searchById", UUID)
+        def query = repository.getRequiredMethod("searchById", Long)
                 .stringValue(Query).get()
 
         expect:"The query contains the correct join"
@@ -116,6 +137,43 @@ interface FoodRepository extends CrudRepository<Food, UUID> {
 
         expect:
         query == 'SELECT food_.`fid`,food_.`key`,food_.`carbohydrates`,food_.`portion_grams`,food_.`created_on`,food_.`updated_on`,food_.`fk_meal_id`,food_.`fk_alt_meal`,food_meal_.`current_blood_glucose` AS meal_current_blood_glucose,food_meal_.`created_on` AS meal_created_on,food_meal_.`updated_on` AS meal_updated_on FROM `food` food_ INNER JOIN `meal` food_meal_ ON food_.`fk_meal_id`=food_meal_.`mid` WHERE (food_.`fid` = ?)'
+
+    }
+
+    void "test query with an entity with custom id and id field"() {
+        given:
+        def repository = buildRepository('test.CustomIdEntityRepository', """
+import io.micronaut.data.jdbc.annotation.JdbcRepository;
+import io.micronaut.data.model.query.builder.sql.Dialect;
+import io.micronaut.data.tck.entities.CustomIdEntity;
+import java.util.Optional;
+import java.util.UUID;
+
+@JdbcRepository(dialect= Dialect.MYSQL)
+@io.micronaut.context.annotation.Executable
+interface CustomIdEntityRepository extends CrudRepository<CustomIdEntity, Long> {
+    
+    Optional<CustomIdEntity> findByCustomId(Long customId);
+    
+    boolean existsByCustomId(Long customId);
+    
+    void deleteByCustomId(Long customId);
+}
+""")
+        when:
+        def q = repository.getRequiredMethod(method, Long)
+                .stringValue(Query).get()
+
+        then:
+        q == query
+
+        where:
+        method             | query
+        "existsByCustomId" | 'SELECT custom_id_entity_.`custom_id` FROM `custom_id_entity` custom_id_entity_ WHERE (custom_id_entity_.`custom_id` = ?)'
+        "deleteByCustomId" | 'DELETE  FROM `custom_id_entity`  WHERE (`custom_id` = ?)'
+        "findByCustomId"   | 'SELECT custom_id_entity_.`custom_id`,custom_id_entity_.`id`,custom_id_entity_.`name` FROM `custom_id_entity` custom_id_entity_ WHERE (custom_id_entity_.`custom_id` = ?)'
+        "existsById"       | 'SELECT custom_id_entity_.`custom_id` FROM `custom_id_entity` custom_id_entity_ WHERE (custom_id_entity_.`id` = ?)'
+        "findById"         | 'SELECT custom_id_entity_.`custom_id`,custom_id_entity_.`id`,custom_id_entity_.`name` FROM `custom_id_entity` custom_id_entity_ WHERE (custom_id_entity_.`id` = ?)'
 
     }
 
@@ -192,6 +250,29 @@ ${entity('SomeEntity', [internetNumber: Long])}
 
         expect:
         repository != null
+    }
+
+    void "test multiple join query"() {
+        given:
+            def repository = buildRepository('test.MealRepository', """
+import io.micronaut.data.jdbc.annotation.JdbcRepository;
+import io.micronaut.data.model.query.builder.sql.Dialect;
+import io.micronaut.data.tck.entities.Meal;
+import java.util.UUID;
+
+@JdbcRepository(dialect= Dialect.MYSQL)
+@io.micronaut.context.annotation.Executable
+interface MealRepository extends CrudRepository<Meal, Long> {
+    int countDistinctByFoodsAlternativeMealCurrentBloodGlucoseInList(List<Integer> list);
+}
+""")
+
+            def query = repository.getRequiredMethod("countDistinctByFoodsAlternativeMealCurrentBloodGlucoseInList", List)
+                    .stringValue(Query).get()
+
+        expect:
+            query == 'SELECT COUNT(*) FROM `meal` meal_ INNER JOIN `food` meal_foods_ ON meal_.`mid`=meal_foods_.`fk_meal_id` INNER JOIN `meal` meal_foods_alternative_meal_ ON meal_foods_.`fk_alt_meal`=meal_foods_alternative_meal_.`mid` WHERE (meal_foods_alternative_meal_.`current_blood_glucose` IN (?))'
+
     }
 
 

@@ -23,4 +23,8 @@ import io.micronaut.data.repository.CrudRepository;
 
 @JdbcRepository(dialect = Dialect.H2)
 public interface ShipmentRepository extends CrudRepository<Shipment, ShipmentId> {
+
+    Shipment findByShipmentIdCountry(String country);
+
+    Shipment findByShipmentIdCountryAndShipmentIdCity(String country, String city);
 }

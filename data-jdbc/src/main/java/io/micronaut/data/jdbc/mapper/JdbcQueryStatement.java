@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.jdbc.mapper;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.runtime.mapper.QueryStatement;
 import io.micronaut.data.model.DataType;
@@ -38,6 +38,7 @@ public class JdbcQueryStatement implements QueryStatement<PreparedStatement, Int
             try {
                 switch (dataType) {
                     case ENTITY:
+                        throw new IllegalStateException("Cannot set null value as ENTITY data type!");
                     case LONG:
                         statement.setNull(index, Types.BIGINT);
                         return this;

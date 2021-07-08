@@ -15,12 +15,11 @@
  */
 package io.micronaut.data.model;
 
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.annotation.Creator;
 import io.micronaut.core.annotation.Introspected;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.validation.constraints.Min;
+import io.micronaut.core.annotation.NonNull;
 import java.util.Objects;
 
 /**
@@ -48,8 +47,8 @@ final class DefaultPageable implements Pageable {
         if (page < 0) {
             throw new IllegalArgumentException("Page index cannot be negative");
         }
-        if (size < 1) {
-            throw new IllegalArgumentException("Max size cannot be less than 1");
+        if (size == 0) {
+            throw new IllegalArgumentException("Size cannot be 0");
         }
         this.max = size;
         this.number = page;
@@ -57,7 +56,7 @@ final class DefaultPageable implements Pageable {
     }
 
     @Override
-    public @Min(1) int getSize() {
+    public int getSize() {
         return max;
     }
 

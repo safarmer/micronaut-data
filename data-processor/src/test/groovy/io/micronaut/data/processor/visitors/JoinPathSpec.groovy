@@ -85,7 +85,7 @@ class User {
                 .stringValue(Query).get()
 
         expect:
-        query == 'SELECT *,user_authorities_."name12345" AS authorities_name12345 FROM "user" user_ INNER JOIN user_authority user_authorities_user_authority_ ON user_."id"=user_authorities_user_authority_.user_id  INNER JOIN "authority" user_authorities_ ON user_authorities_user_authority_.authority_id=user_authorities_."name12345" WHERE (user_."id" = ?)'
+        query == 'SELECT user_."id",user_authorities_."name12345" AS authorities_name12345 FROM "user" user_ INNER JOIN "user_authority" user_authorities_user_authority_ ON user_."id"=user_authorities_user_authority_."user_id"  INNER JOIN "authority" user_authorities_ ON user_authorities_user_authority_."authority_id"=user_authorities_."name12345" WHERE (user_."id" = ?)'
     }
 
     @Unroll
@@ -114,8 +114,8 @@ interface MyInterface extends GenericRepository<City, Long> {
 
         where:
         method                           | returnType | arguments     | query
-        "findByCountryRegionCountryName" | "City"     | "String name" | "SELECT city_ FROM $City.name AS city_ WHERE (city_.countryRegion.country.name = :p1)"
-        "findByCountryRegionName"        | "City"     | "String name" | "SELECT city_ FROM $City.name AS city_ WHERE (city_.countryRegion.name = :p1)"
+        "findByCountryRegionCountryName" | "City"     | "String name" | "SELECT city_ FROM $City.name AS city_ JOIN city_.countryRegion city_country_region_ JOIN city_country_region_.country city_country_region_country_ WHERE (city_country_region_country_.name = :p1)"
+        "findByCountryRegionName"        | "City"     | "String name" | "SELECT city_ FROM $City.name AS city_ JOIN city_.countryRegion city_country_region_ WHERE (city_country_region_.name = :p1)"
     }
 
 
@@ -177,7 +177,7 @@ interface MyInterface extends GenericRepository<CountryRegion, Long> {
 
         where:
         method             | returnType      | arguments     | joinTableExpression
-        "findByCitiesName" | "CountryRegion" | "String name" | "INNER JOIN countryRegionCity country_region_cities_countryRegionCity_ ON country_region_.\"id\"=country_region_cities_countryRegionCity_.countryRegionId  INNER JOIN \"T_CITY\" country_region_cities_ ON country_region_cities_countryRegionCity_.cityId=country_region_cities_.\"id\" WHERE (country_region_cities_.\"C_NAME\" = ?)"
+        "findByCitiesName" | "CountryRegion" | "String name" | "INNER JOIN \"countryRegionCity\" country_region_cities_countryRegionCity_ ON country_region_.\"id\"=country_region_cities_countryRegionCity_.\"countryRegionId\"  INNER JOIN \"T_CITY\" country_region_cities_ ON country_region_cities_countryRegionCity_.\"cityId\"=country_region_cities_.\"id\" WHERE (country_region_cities_.\"C_NAME\" = ?)"
     }
 
     @Unroll
@@ -386,7 +386,7 @@ interface MyInterface extends GenericRepository<City, Long> {
 
         where:
         joinPath        | method                           | returnType | arguments     | whereClause
-        "countryRegion" | "findByCountryRegionCountryName" | "City"     | "String name" | "WHERE (city_country_region_.country.name = :p1)"
+        "countryRegion" | "findByCountryRegionCountryName" | "City"     | "String name" | "WHERE (city_country_region_country_.name = :p1)"
         "countryRegion" | "findByCountryRegionName"        | "City"     | "String name" | "WHERE (city_country_region_.name = :p1)"
     }
 
@@ -408,8 +408,8 @@ interface MyInterface extends io.micronaut.data.tck.repositories.ShelfRepository
         def query = method.stringValue(Query).get()
 
         expect:
-        query.contains('LEFT JOIN shelf_book b_shelf_book_ ON shelf_."id"=b_shelf_book_.shelf_id ')
-        query.contains('LEFT JOIN "book" b_ ON b_shelf_book_.book_id=b_."id" ')
+        query.contains('LEFT JOIN "shelf_book" b_shelf_book_ ON shelf_."id"=b_shelf_book_."shelf_id" ')
+        query.contains('LEFT JOIN "book" b_ ON b_shelf_book_."book_id"=b_."id" ')
         query.contains('LEFT JOIN "page" p_ ON b_."id"=p_."book_id" ')
     }
 }

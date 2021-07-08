@@ -15,16 +15,16 @@
  */
 package io.micronaut.data.runtime.operations;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.NonNull;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.async.publisher.Publishers;
 import io.micronaut.core.convert.ConversionService;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.util.ArgumentUtils;
+import io.micronaut.data.model.Page;
 import io.micronaut.data.model.runtime.*;
 import io.micronaut.data.operations.RepositoryOperations;
 import io.micronaut.data.operations.reactive.ReactiveRepositoryOperations;
-import io.micronaut.data.model.Page;
 import io.reactivex.Flowable;
 import org.reactivestreams.Publisher;
 
@@ -163,7 +163,15 @@ public class ExecutorReactiveOperations implements ReactiveRepositoryOperations 
 
     @NonNull
     @Override
-    public <T> Publisher<T> persistAll(@NonNull BatchOperation<T> operation) {
+    public <T> Publisher<T> updateAll(@NonNull UpdateBatchOperation<T> operation) {
+        return Flowable.fromPublisher(Publishers.fromCompletableFuture(() ->
+                asyncOperations.updateAll(operation)
+        )).flatMap(Flowable::fromIterable);
+    }
+
+    @NonNull
+    @Override
+    public <T> Publisher<T> persistAll(@NonNull InsertBatchOperation<T> operation) {
         return Flowable.fromPublisher(Publishers.fromCompletableFuture(() ->
                 asyncOperations.persistAll(operation)
         )).flatMap(Flowable::fromIterable);
@@ -179,7 +187,13 @@ public class ExecutorReactiveOperations implements ReactiveRepositoryOperations 
 
     @NonNull
     @Override
-    public <T> Publisher<Number> deleteAll(BatchOperation<T> operation) {
+    public <T> Publisher<Number> delete(@NonNull DeleteOperation<T> operation) {
+        return Publishers.fromCompletableFuture(() -> asyncOperations.delete(operation));
+    }
+
+    @NonNull
+    @Override
+    public <T> Publisher<Number> deleteAll(@NonNull DeleteBatchOperation<T> operation) {
         return Publishers.map(Publishers.fromCompletableFuture(() ->
                 asyncOperations.deleteAll(operation)
         ), number -> convertNumberArgumentIfNecessary(number, operation.getResultArgument()));

@@ -15,7 +15,7 @@
  */
 package io.micronaut.data.model;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.AnnotationMetadata;
 import io.micronaut.core.naming.NameUtils;
 import io.micronaut.data.annotation.AutoPopulated;
@@ -104,6 +104,13 @@ public interface PersistentProperty extends PersistentElement {
      */
     default boolean isGenerated() {
         return getAnnotationMetadata().hasAnnotation(GeneratedValue.class);
+    }
+
+    /**
+     * @return True if the property is autopopulated
+     */
+    default boolean isAutoPopulated() {
+        return !isGenerated() && getAnnotationMetadata().hasStereotype(AutoPopulated.class);
     }
 
     /**

@@ -18,11 +18,13 @@ package io.micronaut.data.runtime.intercept;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.core.convert.ConversionService;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.*;
 import java.time.chrono.ChronoLocalDate;
 import java.util.Collection;
 import java.util.Date;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -39,6 +41,17 @@ class DataInitializer {
      */
     DataInitializer() {
         ConversionService<?> conversionService = ConversionService.SHARED;
+
+        conversionService.addConverter(Enum.class, Number.class, Enum::ordinal);
+        conversionService.addConverter(Number.class, Enum.class, (index, targetType, context) -> {
+            Enum[] enumConstants = targetType.getEnumConstants();
+            int i = index.intValue();
+            if (i >= enumConstants.length) {
+                throw new IllegalStateException("Cannot find an enum value at index: " + i + " for enum: " + targetType);
+            }
+            return Optional.of(enumConstants[i]);
+        });
+        conversionService.addConverter(Number.class, Character.class, number -> (char) number.intValue());
 
         conversionService.addConverter(byte[].class, UUID.class, UUID::nameUUIDFromBytes);
         conversionService.addConverter(Date.class, LocalDate.class, date ->
@@ -170,6 +183,21 @@ class DataInitializer {
             return floats;
         });
 
+        conversionService.addConverter(Float[].class, BigDecimal[].class, values -> {
+            BigDecimal[] bigs = new BigDecimal[values.length];
+            for (int i = 0; i < values.length; i++) {
+                bigs[i] = BigDecimal.valueOf(values[i]);
+            }
+            return bigs;
+        });
+        conversionService.addConverter(float[].class, BigDecimal[].class, values -> {
+            BigDecimal[] bigs = new BigDecimal[values.length];
+            for (int i = 0; i < values.length; i++) {
+                bigs[i] = BigDecimal.valueOf(values[i]);
+            }
+            return bigs;
+        });
+
         conversionService.addConverter(Collection.class, Integer[].class, collection -> {
             Integer[] ints = new Integer[collection.size()];
             int i = 0;
@@ -261,6 +289,20 @@ class DataInitializer {
                 doubles[i] = values[i];
             }
             return doubles;
+        });
+        conversionService.addConverter(Double[].class, BigDecimal[].class, values -> {
+            BigDecimal[] bigs = new BigDecimal[values.length];
+            for (int i = 0; i < values.length; i++) {
+                bigs[i] = BigDecimal.valueOf(values[i]);
+            }
+            return bigs;
+        });
+        conversionService.addConverter(double[].class, BigDecimal[].class, values -> {
+            BigDecimal[] bigs = new BigDecimal[values.length];
+            for (int i = 0; i < values.length; i++) {
+                bigs[i] = BigDecimal.valueOf(values[i]);
+            }
+            return bigs;
         });
 
         conversionService.addConverter(Collection.class, Boolean[].class, collection -> {

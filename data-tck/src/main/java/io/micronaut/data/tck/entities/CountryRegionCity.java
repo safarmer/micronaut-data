@@ -19,7 +19,7 @@ import io.micronaut.data.annotation.MappedEntity;
 import io.micronaut.data.annotation.Relation;
 import io.micronaut.data.model.naming.NamingStrategies;
 
-@MappedEntity(namingStrategy = NamingStrategies.Raw.class)
+@MappedEntity(namingStrategy = NamingStrategies.Raw.class, value = "countryRegionCity")
 public class CountryRegionCity {
     private final CountryRegion countryRegion;
     private final City city;

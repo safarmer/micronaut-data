@@ -15,18 +15,20 @@
  */
 package io.micronaut.data.model.naming;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Introspected;
+import io.micronaut.core.naming.NameUtils;
 import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.data.annotation.MappedEntity;
 import io.micronaut.data.annotation.MappedProperty;
+import io.micronaut.data.annotation.Relation;
 import io.micronaut.data.model.Association;
 import io.micronaut.data.model.Embedded;
 import io.micronaut.data.model.PersistentEntity;
 import io.micronaut.data.model.PersistentProperty;
 
-import java.util.function.Supplier;
+import java.util.List;
 
 
 /**
@@ -65,7 +67,7 @@ public interface NamingStrategy {
     }
 
     /**
-     * Return the mapped name given an {@link Embedded} association and the property of the assocation. The
+     * Return the mapped name given an {@link Embedded} association and the property of the association. The
      * default strategy takes the parent embedded property name and combines it underscore separated with the child parent property name.
      *
      * <p>For example given:</p>
@@ -80,7 +82,7 @@ public interface NamingStrategy {
      * @return The mapped name
      */
     default @NonNull String mappedName(Embedded embedded, PersistentProperty property) {
-        return mappedName(embedded.getName() + property.getCapitilizedName());
+        return mappedName(embedded.getName() + NameUtils.capitalize(property.getPersistedName()));
     }
 
     /**
@@ -90,28 +92,95 @@ public interface NamingStrategy {
      */
     default @NonNull String mappedName(@NonNull PersistentProperty property) {
         ArgumentUtils.requireNonNull("property", property);
-        Supplier<String> defaultNameSupplier = () -> mappedName(property.getName());
         if (property instanceof Association) {
-            Association association = (Association) property;
-            if (association.isForeignKey()) {
-                return mappedName(association.getOwner().getDecapitalizedName() +
-                                    association.getAssociatedEntity().getSimpleName());
-            } else {
-                switch (association.getKind()) {
-                    case ONE_TO_ONE:
-                    case MANY_TO_ONE:
-                        return property.getAnnotationMetadata().stringValue(MappedProperty.class)
-                                .orElseGet(() -> mappedName(property.getName() + getForeignKeySuffix()));
-                    default:
-                        return property.getAnnotationMetadata().stringValue(MappedProperty.class)
-                                .orElseGet(defaultNameSupplier);
+            return mappedName((Association) property);
+        } else {
+            return property.getAnnotationMetadata()
+                    .stringValue(MappedProperty.class)
+                    .filter(StringUtils::isNotEmpty)
+                    .orElseGet(() -> mappedName(property.getName()));
+        }
+    }
+
+    /**
+     * Return the mapped name for the given association.
+     * @param association The association
+     * @return The mapped name
+     */
+    default @NonNull String mappedName(Association association) {
+        String providedName = association.getAnnotationMetadata().stringValue(MappedProperty.class).orElse(null);
+        if (providedName != null) {
+            return providedName;
+        }
+        if (association.isForeignKey()) {
+            return mappedName(association.getOwner().getDecapitalizedName() + association.getAssociatedEntity().getSimpleName());
+        } else {
+            switch (association.getKind()) {
+                case ONE_TO_ONE:
+                case MANY_TO_ONE:
+                    return mappedName(association.getName() + getForeignKeySuffix());
+                default:
+                    return mappedName(association.getName());
+            }
+        }
+    }
+
+    default @NonNull String mappedName(@NonNull List<Association> associations, @NonNull PersistentProperty property) {
+        if (associations.isEmpty()) {
+            return mappedName(property);
+        }
+        StringBuilder sb = new StringBuilder();
+        Association foreignAssociation = null;
+        for (Association association : associations) {
+            if (association.getKind() != Relation.Kind.EMBEDDED) {
+                if (foreignAssociation == null) {
+                    foreignAssociation = association;
                 }
             }
-        } else {
-            return property.getAnnotationMetadata().stringValue(MappedProperty.class)
-                    .map(s -> StringUtils.isEmpty(s) ? defaultNameSupplier.get() : s)
-                    .orElseGet(defaultNameSupplier);
+            if (sb.length() > 0) {
+                sb.append(NameUtils.capitalize(association.getName()));
+            } else {
+                sb.append(association.getName());
+            }
         }
+        if (foreignAssociation != null) {
+            if (foreignAssociation.getAssociatedEntity() == property.getOwner()
+                    && foreignAssociation.getAssociatedEntity().getIdentity() == property) {
+                String providedName = foreignAssociation.getAnnotationMetadata().stringValue(MappedProperty.class).orElse(null);
+                if (providedName != null) {
+                    return providedName;
+                }
+                sb.append(getForeignKeySuffix());
+                return mappedName(sb.toString());
+            } else if (foreignAssociation.isForeignKey()) {
+                throw new IllegalStateException("Foreign association cannot be mapped!");
+            }
+        } else {
+            String providedName = property.getAnnotationMetadata().stringValue(MappedProperty.class).orElse(null);
+            if (providedName != null) {
+                return providedName;
+            }
+        }
+        if (sb.length() > 0) {
+            sb.append(NameUtils.capitalize(property.getName()));
+        } else {
+            sb.append(property.getName());
+        }
+        return mappedName(sb.toString());
+    }
+
+    default String mappedJoinTableColumn(PersistentEntity associated, List<Association> associations, PersistentProperty property) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(associated.getDecapitalizedName());
+        for (Association association : associations) {
+            sb.append(NameUtils.capitalize(association.getName()));
+        }
+        if (associations.isEmpty()) {
+            sb.append(getForeignKeySuffix());
+        } else {
+            sb.append(NameUtils.capitalize(property.getName()));
+        }
+        return mappedName(sb.toString());
     }
 
     /**

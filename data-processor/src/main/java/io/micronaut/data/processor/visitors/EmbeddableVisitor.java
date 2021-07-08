@@ -15,6 +15,7 @@
  */
 package io.micronaut.data.processor.visitors;
 
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.data.annotation.Embeddable;
 import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.visitor.TypeElementVisitor;
@@ -34,5 +35,11 @@ public class EmbeddableVisitor implements TypeElementVisitor<Embeddable, Object>
     public void visitClass(ClassElement element, VisitorContext context) {
         mappedEntityVisitor
                 .visitClass(element, context);
+    }
+
+    @NonNull
+    @Override
+    public VisitorKind getVisitorKind() {
+        return VisitorKind.ISOLATING;
     }
 }
